@@ -1,6 +1,6 @@
 <?php
 /* auth.php
- * Copyright (c) 2019 Annie Advisor
+ * Copyright (c) 2019-2021 Annie Advisor
  * All rights reserved.
  * Contributors:
  *  Lauri Jokipii <lauri.jokipii@annieadvisor.com>
@@ -27,13 +27,26 @@ if (isset($_SERVER['PHP_AUTH_USER']) && isset($_SERVER['PHP_AUTH_PW'])) {
   $validated = (in_array($user, $valid_users)) && ($pass == $valid_passwords[$user]);
 }
 
-if (!$validated) {
+if ($validated) {
+  $auth_uid = $user;
+} else {
   //header('HTTP/1.0 401 Unauthorized');
   //die ("Not authorized");
   // the same as frontend relies on!
   require_once('/opt/simplesamlphp/lib/_autoload.php');
   $as = new \SimpleSAML\Auth\Simple('my_app_specific_saml');
   $as->requireAuth();
+  foreach ($as->getAttributes() as $k => $v) {
+    // nb! $v is an array but we get the first one in any case
+    switch ($k) {
+      case 'uid':
+      case 'urn:mpass.id:uid':
+      case 'MPASS-10-MPASSUID':
+        $auth_uid = $v[0];
+        break;
+        // no default
+    }
+  }
 }
 // If arrives here, is a valid user.
 

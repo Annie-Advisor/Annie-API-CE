@@ -1,6 +1,6 @@
 <?php
 /* anniedb.php
- * Copyright (c) 2020 Annie Advisor
+ * Copyright (c) 2019-2021 Annie Advisor
  * All rights reserved.
  * Contributors:
  *  Lauri Jokipii <lauri.jokipii@annieadvisor.com>
@@ -14,7 +14,7 @@ namespace Annie\Advisor;
 use PDO;
 
 class DB {
-  const VERSION = "1.0.0";
+  const VERSION = "1.1.1";
 
   //
   // VARIABLES
@@ -22,18 +22,24 @@ class DB {
 
   private $dbh;
   private $dbhost, $dbport, $dbname, $dbschm, $dbuser, $dbpass;
+  private $salt;
+  private $cipher;
 
   //
   // CONSTRUCTORS & DESTRUCTORS
   //
 
-  public function __construct($dbhost,$dbport,$dbname,$dbschm,$dbuser,$dbpass) {
+  public function __construct($dbhost,$dbport,$dbname,$dbschm,$dbuser,$dbpass,$salt) {
+    global $auth_uid;
+    $this->auth_uid = $auth_uid;
     $this->dbhost = $dbhost;
     $this->dbport = $dbport;
     $this->dbname = $dbname;
     $this->dbschm = $dbschm;
     $this->dbuser = $dbuser;
     $this->dbpass = $dbpass;
+    $this->salt   = $salt;
+    $this->cipher = "aes-256-cbc";
 
     try {
       $this->dbh = new PDO("pgsql: host=$this->dbhost; port=$this->dbport; dbname=$this->dbname", $this->dbuser, $this->dbpass);
@@ -48,8 +54,276 @@ class DB {
   }
 
   //
-  // ACCESSORIES
+  // PRIVATES
   //
+
+  public function encrypt($string,$iv) {
+      $output = false;
+
+      if (in_array($this->cipher, openssl_get_cipher_methods())) {
+          $output = openssl_encrypt($string, $this->cipher, $this->salt, $options=0, $iv);
+      }
+
+      return $output;
+  }
+
+  public function decrypt($string,$iv) {
+      $output = false;
+
+      if (in_array($this->cipher, openssl_get_cipher_methods())) {
+          $output = openssl_decrypt($string, $this->cipher, $this->salt, $options=0, $iv);
+      }
+
+      return $output;
+  }
+
+  //
+  // ACCESSORIES (CRUD)
+  //
+
+  public function selectAnnieuser($id) {
+    $dbschm = $this->dbschm;
+    $sql = "SELECT id, meta, superuser, iv FROM $dbschm.annieuser";
+    if ($id) {
+      $sql.= " WHERE id = :id ";
+    }
+    // excecute SQL statement
+    $sth = $this->dbh->prepare($sql);
+    if ($id) {
+      $sth->bindParam(':id', $id);
+    }
+    $sth->execute();
+    // modify for return
+    $rows = $sth->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rows as $rownum => &$row) { //nb! will modify data in loop hence "&"
+      $iv = null;
+      if (array_key_exists('iv', $row)) {
+        $iv = base64_decode($row['iv']);
+      }
+      if (array_key_exists('meta', $row)) {
+        $row['meta'] = json_decode($this->decrypt($row['meta'],$iv));
+      }
+    }
+    return $rows;
+  }
+
+  public function insertAnnieuser($id,$input) {
+    $dbschm = $this->dbschm;
+    if (!array_key_exists('id', $input) || $input->{'id'}=="") {
+      if (!$id) {
+        return false;
+      }
+      $input->{'id'} = $id;
+    }
+    // default if missing
+    if (!array_key_exists('meta', $input)) {
+      $input->{'meta'} = "";
+    }
+    if (!array_key_exists('superuser', $input)) {
+      $input->{'superuser'} = false;
+    }
+    //iv
+    if (!array_key_exists('validuntil', $input)) {
+      $input->{'validuntil'} = null;
+    }
+    if (!array_key_exists('updated', $input)) {
+      $input->{'updated'} = date_format(date_create(),"Y-m-d H:i:s.v");
+    }
+    if (!array_key_exists('updatedby', $input)) {
+      $input->{'updatedby'} = "Annie";
+    }
+    if (!array_key_exists('created', $input)) {
+      $input->{'created'} = date_format(date_create(),"Y-m-d H:i:s.v");
+    }
+    if (!array_key_exists('createdby', $input)) {
+      $input->{'createdby'} = "Annie";
+    }
+    // encrypt:
+    $ivlen = openssl_cipher_iv_length($this->cipher);
+    $iv = openssl_random_pseudo_bytes($ivlen);
+    $enc_meta = $this->encrypt($input->{'meta'},$iv);
+    $enc_iv = base64_encode($iv);//store $iv for decryption later
+    //-encrypt
+    $sql = "
+      INSERT INTO $dbschm.annieuser (id,meta,superuser,iv,validuntil,updated,updatedby,created,createdby)
+      VALUES (:id,:meta,:superuser,:iv,:validuntil,:updated,:updatedby,:created,:createdby)
+    ";
+    $sth = $this->dbh->prepare($sql);
+    $sth->bindParam(':id', $input->{'id'});
+    $sth->bindParam(':meta', $enc_meta);
+    $sth->bindParam(':superuser', $input->{'superuser'});
+    $sth->bindParam(':iv', $enc_iv);
+    $sth->bindParam(':validuntil', $input->{'validuntil'});
+    $sth->bindParam(':updated', $input->{'updated'});
+    $sth->bindParam(':updatedby', $input->{'updatedby'});
+    $sth->bindParam(':created', $input->{'created'});
+    $sth->bindParam(':createdby', $input->{'createdby'});
+    if (!$sth->execute()) return false;
+    if ($sth->rowCount() < 1) return false;
+    return $input->{'id'}; //nb! return the ID of inserted row
+  }
+
+  public function updateAnnieuser($id,$input) {
+    $dbschm = $this->dbschm;
+    // default if missing
+    if (!array_key_exists('meta', $input)) {
+      $input->{'meta'} = "";
+    }
+    if (!array_key_exists('superuser', $input)) {
+      $input->{'superuser'} = false;
+    }
+    //iv
+    if (!array_key_exists('validuntil', $input)) {
+      $input->{'validuntil'} = null;
+    }
+    if (!array_key_exists('updated', $input)) {
+      $input->{'updated'} = date_format(date_create(),"Y-m-d H:i:s.v");
+    }
+    if (!array_key_exists('updatedby', $input)) {
+      $input->{'updatedby'} = "Annie";
+    }
+    // encrypt:
+    $ivlen = openssl_cipher_iv_length($this->cipher);
+    $iv = openssl_random_pseudo_bytes($ivlen);
+    $enc_meta = $this->encrypt($input->{'meta'},$iv);
+    $enc_iv = base64_encode($iv);//store $iv for decryption later
+    //-encrypt
+    $sql = "
+      UPDATE $dbschm.annieuser
+      SET meta=:meta, superuser=:superuser, iv=:iv, validuntil=:validuntil, updated=:updated, updatedby=:updatedby
+      WHERE id=:id
+    ";
+    $sth = $this->dbh->prepare($sql);
+    $sth->bindParam(':meta', $enc_meta);
+    $sth->bindParam(':superuser', $input->{'superuser'});
+    $sth->bindParam(':iv', $enc_iv);
+    $sth->bindParam(':validuntil', $input->{'validuntil'});
+    $sth->bindParam(':updated', $input->{'updated'});
+    $sth->bindParam(':updatedby', $input->{'updatedby'});
+    $sth->bindParam(':id', $id);
+    if (!$sth->execute()) return false;
+    if ($sth->rowCount() < 1) return false;
+    return true;
+  }
+
+  public function deleteAnnieuser($id) {
+    $dbschm = $this->dbschm;
+    if (!$id) {
+      return false;
+    }
+    $sql = "DELETE FROM $dbschm.annieuser WHERE id = :id";
+    $sth = $this->dbh->prepare($sql);
+    $sth->bindParam(':id', $id);
+    if (!$sth->execute()) return false;
+    if ($sth->rowCount() < 1) return false;
+    return true;
+  }
+
+  public function selectAnnieusersurvey($id) {
+    $dbschm = $this->dbschm;
+    $sql = "SELECT id, annieuser, survey, meta FROM $dbschm.annieusersurvey";
+    if ($id) {
+      $sql.= " WHERE id = :id ";
+      //todo: annieuser = :annieuser
+    }
+    // excecute SQL statement
+    $sth = $this->dbh->prepare($sql);
+    if ($id) {
+      $sth->bindParam(':id', $id);
+    }
+    $sth->execute();
+    // modify for return
+    $rows = $sth->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rows as $rownum => &$row) { //nb! will modify data in loop hence "&"
+      if (array_key_exists('meta', $row)) {
+        $row['meta'] = json_decode($row['meta']);
+      }
+    }
+    return $rows;
+  }
+
+  public function insertAnnieusersurvey($input) { // nb! no id, generated!
+    $dbschm = $this->dbschm;
+    if (!array_key_exists('annieuser', $input) || $input->{'annieuser'}=="") {
+      return false;
+    }
+    if (!array_key_exists('survey', $input) || $input->{'survey'}=="") {
+      return false;
+    }
+    if (!array_key_exists('meta', $input)) {
+      $input->{'meta'} = "";
+    }
+    // default if missing
+    if (!array_key_exists('updated', $input)) {
+      $input->{'updated'} = date_format(date_create(),"Y-m-d H:i:s.v");
+    }
+    if (!array_key_exists('updatedby', $input)) {
+      $input->{'updatedby'} = "Annie";
+    }
+    $sql = "
+      INSERT INTO $dbschm.annieusersurvey (annieuser,survey,meta,updated,updatedby)
+      VALUES (:annieuser,:survey,:meta,:updated,:updatedby)
+    ";
+    $sth = $this->dbh->prepare($sql);
+    //$sth->bindParam(':id', $input->{'id'});
+    $sth->bindParam(':annieuser', $input->{'annieuser'});
+    $sth->bindParam(':survey', $input->{'survey'});
+    $sth->bindParam(':meta', $input->{'meta'});
+    $sth->bindParam(':updated', $input->{'updated'});
+    $sth->bindParam(':updatedby', $input->{'updatedby'});
+    if (!$sth->execute()) return false;
+    if ($sth->rowCount() < 1) return false;
+    return $this->dbh->lastInsertId(); //nb! return the ID of inserted row
+  }
+
+  public function updateAnnieusersurvey($id,$input) {
+    $dbschm = $this->dbschm;
+    // to-do-ish: if not given don't update, now go with all-at-once method
+    if (!array_key_exists('meta', $input)) {
+      $input->{'meta'} = "";
+    }
+    if (!array_key_exists('annieuser', $input) || $input->{'annieuser'}=="") {
+      return false;
+    }
+    if (!array_key_exists('survey', $input) || $input->{'survey'}=="") {
+      return false;
+    }
+    // default if missing
+    if (!array_key_exists('updated', $input)) {
+      $input->{'updated'} = date_format(date_create(),"Y-m-d H:i:s.v");
+    }
+    if (!array_key_exists('updatedby', $input)) {
+      $input->{'updatedby'} = "Annie";
+    }
+    $sql = "
+      UPDATE $dbschm.annieusersurvey
+      SET annieuser=:annieuser, survey=:survey, meta=:meta, updated=:updated, updatedby=:updatedby
+      WHERE id=:id
+    ";
+    $sth = $this->dbh->prepare($sql);
+    $sth->bindParam(':annieuser', $input->{'annieuser'});
+    $sth->bindParam(':survey', $input->{'survey'});
+    $sth->bindParam(':meta', $input->{'meta'});
+    $sth->bindParam(':updated', $input->{'updated'});
+    $sth->bindParam(':updatedby', $input->{'updatedby'});
+    $sth->bindParam(':id', $id);
+    if (!$sth->execute()) return false;
+    if ($sth->rowCount() < 1) return false;
+    return true;
+  }
+
+  public function deleteAnnieusersurvey($id) {
+    $dbschm = $this->dbschm;
+    if (!$id) {
+      return false;
+    }
+    $sql = "DELETE FROM $dbschm.annieusersurvey WHERE id = :id";
+    $sth = $this->dbh->prepare($sql);
+    $sth->bindParam(':id', $id);
+    if (!$sth->execute()) return false;
+    if ($sth->rowCount() < 1) return false;
+    return true;
+  }
 
   public function selectCodes($codeset,$code) {
     $dbschm = $this->dbschm;
@@ -98,7 +372,7 @@ class DB {
 
   public function selectContact($contact) {
     $dbschm = $this->dbschm;
-    $sql = "SELECT contact FROM $dbschm.contact ";
+    $sql = "SELECT id,contact,iv FROM $dbschm.contact ";
     if ($contact) {
       $sql.= " WHERE id = :contact ";
     }
@@ -111,8 +385,12 @@ class DB {
     // modify for return
     $rows = $sth->fetchAll(PDO::FETCH_ASSOC);
     foreach ($rows as $rownum => &$row) { //nb! will modify data in loop hence "&"
+      $iv = null;
+      if (array_key_exists('iv', $row)) {
+        $iv = base64_decode($row['iv']);
+      }
       if (array_key_exists('contact', $row)) {
-        $row['contact'] = json_decode($row['contact']);
+        $row['contact'] = json_decode($this->decrypt($row['contact'],$iv));
       }
     }
     return $rows;
@@ -151,7 +429,7 @@ class DB {
       return false;
     }
     if (!array_key_exists('updated', $input)) {
-      $input->{'updated'} = date_format(date_create(),"Y-m-d H:i:s.v")." UTC"; //TODO figure out TZ thingy
+      $input->{'updated'} = date_format(date_create(),"Y-m-d H:i:s.v");
     }
     if (!array_key_exists('updatedby', $input)) {
       $input->{'updatedby'} = "Annie";
@@ -193,23 +471,7 @@ class DB {
     return false;
   }
 
-  public function selectMessage($message) {
-    $dbschm = $this->dbschm;
-    $sql = "
-      SELECT id,updated,updatedby,contact,body,sender,survey
-      FROM $dbschm.message
-    ";
-    if ($message) {
-      $sql.= " WHERE id = :message ";
-    }
-    // excecute SQL statement
-    $sth = $this->dbh->prepare($sql);
-    if ($message) {
-      $sth->bindParam(':message', $message);
-    }
-    $sth->execute();
-    return $sth->fetchAll(PDO::FETCH_ASSOC);
-  }
+  // no "normal* selectMessage (using selectContactMessages instead)
 
   public function insertMessage($contact,$input) {
     $dbschm = $this->dbschm;
@@ -231,13 +493,13 @@ class DB {
       $input->{'contact'} = $contact;
     }
     if (!array_key_exists('created', $input)) {
-      $input->{'created'} = date_format(date_create(),"Y-m-d H:i:s.v")." UTC"; //TODO figure out TZ thingy
+      $input->{'created'} = date_format(date_create(),"Y-m-d H:i:s.v");
     }
     if (!array_key_exists('createdby', $input)) {
       $input->{'createdby'} = "Annie";
     }
     if (!array_key_exists('updated', $input)) {
-      $input->{'updated'} = date_format(date_create(),"Y-m-d H:i:s.v")." UTC"; //TODO figure out TZ thingy
+      $input->{'updated'} = date_format(date_create(),"Y-m-d H:i:s.v");
     }
     if (!array_key_exists('updatedby', $input)) {
       $input->{'updatedby'} = "Annie";
@@ -255,21 +517,31 @@ class DB {
       $input->{'status'} = null;
     }
 
+    // encrypt:
+    $ivlen = openssl_cipher_iv_length($this->cipher);
+    $iv = openssl_random_pseudo_bytes($ivlen);
+    $enc_body = $this->encrypt($input->{'body'},$iv);
+    $enc_sender = $this->encrypt($input->{'sender'},$iv);
+    //store $iv for decryption later
+    $enc_iv = base64_encode($iv);
+    //-encrypt
+
     $sql = "
-      INSERT INTO $dbschm.message (id,updated,updatedby,contact,body,sender,survey,status,created,createdby)
-      VALUES (:message,:updated,:updatedby,:contact,:body,:sender,:survey,:status,:created,:createdby)
+      INSERT INTO $dbschm.message (id,updated,updatedby,contact,body,sender,survey,status,created,createdby,iv)
+      VALUES (:message,:updated,:updatedby,:contact,:body,:sender,:survey,:status,:created,:createdby,:iv)
     ";
     $sth = $this->dbh->prepare($sql);
     $sth->bindParam(':message', $input->{'id'});
     $sth->bindParam(':updated', $input->{'updated'});
     $sth->bindParam(':updatedby', $input->{'updatedby'});
     $sth->bindParam(':contact', $input->{'contact'});
-    $sth->bindParam(':body', $input->{'body'});
-    $sth->bindParam(':sender', $input->{'sender'});
+    $sth->bindParam(':body', $enc_body);
+    $sth->bindParam(':sender', $enc_sender);
     $sth->bindParam(':survey', $input->{'survey'});
     $sth->bindParam(':status', $input->{'status'});
     $sth->bindParam(':created', $input->{'created'});
     $sth->bindParam(':createdby', $input->{'createdby'});
+    $sth->bindParam(':iv', $enc_iv);
     if (!$sth->execute()) return false;
     //if ($sth->rowCount() < 1) return false;
     return $input->{'id'}; //nb! return the ID of inserted row
@@ -278,7 +550,7 @@ class DB {
   public function updateMessage($message,$input) {
     $dbschm = $this->dbschm;
     if (!array_key_exists('updated', $input)) {
-      $input->{'updated'} = date_format(date_create(),"Y-m-d H:i:s.v")." UTC"; //TODO figure out TZ thingy
+      $input->{'updated'} = date_format(date_create(),"Y-m-d H:i:s.v");
     }
     if (!array_key_exists('updatedby', $input)) {
       $input->{'updatedby'} = "Annie";
@@ -311,12 +583,12 @@ class DB {
   }
 
 
-  //to-do-ish: "normal" selectSupportneed
+  //to-do-ish: "normal" selectSupportneed (using selectSupportneedsPage instead)
 
   public function insertSupportneed($contact,$input) {
     $dbschm = $this->dbschm;
     if (!array_key_exists('updated', $input)) {
-      $input->{'updated'} = date_format(date_create(),"Y-m-d H:i:s.v")." UTC"; //TODO figure out TZ thingy
+      $input->{'updated'} = date_format(date_create(),"Y-m-d H:i:s.v");
     }
     if (!array_key_exists('updatedby', $input)) {
       $input->{'updatedby'} = "Annie";
@@ -395,7 +667,7 @@ class DB {
   public function selectSupportneedcomment($supportneed) {
     $dbschm = $this->dbschm;
     $sql = "
-      SELECT id,updated,updatedby,supportneed,body
+      SELECT id,updated,updatedby,supportneed,body,iv
       FROM $dbschm.supportneedcomment
     ";
     if ($supportneed) {
@@ -417,7 +689,18 @@ class DB {
       $sth->bindParam(':supportneed', $supportneed);
     }
     $sth->execute();
-    return $sth->fetchAll(PDO::FETCH_ASSOC);
+    // modify for return
+    $rows = $sth->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rows as $rownum => &$row) { //nb! will modify data in loop hence "&"
+      $iv = null;
+      if (array_key_exists('iv', $row)) {
+        $iv = base64_decode($row['iv']);
+      }
+      if (array_key_exists('body', $row)) {
+        $row['body'] = $this->decrypt($row['body'],$iv);
+      }
+    }
+    return $rows;
   }
 
   public function insertSupportneedcomment($supportneed,$input) {
@@ -430,7 +713,7 @@ class DB {
       //}
       if (!array_key_exists('updated', $input)) {
         //$input->{'updated'} = date('Y-m-d G:i:s');
-        $input->{'updated'} = date_format(date_create(),"Y-m-d H:i:s.v")." UTC"; //TODO figure out TZ thingy
+        $input->{'updated'} = date_format(date_create(),"Y-m-d H:i:s.v");
       }
       if (!array_key_exists('updatedby', $input)) {
         $input->{'updatedby'} = "Annie";
@@ -444,15 +727,24 @@ class DB {
         $input->{'body'} = "";
       }
 
+      // encrypt:
+      $ivlen = openssl_cipher_iv_length($this->cipher);
+      $iv = openssl_random_pseudo_bytes($ivlen);
+      $enc_body = $this->encrypt($input->{'body'},$iv);
+      //store $iv for decryption later
+      $enc_iv = base64_encode($iv);
+      //-encrypt
+
       $sql = "
-        INSERT INTO $dbschm.supportneedcomment (updated,updatedby,supportneed,body)
-        VALUES (:updated,:updatedby,:supportneed,:body)
+        INSERT INTO $dbschm.supportneedcomment (updated,updatedby,supportneed,body,iv)
+        VALUES (:updated,:updatedby,:supportneed,:body,:iv)
       ";
       $sth = $this->dbh->prepare($sql);
       $sth->bindParam(':updated', $input->{'updated'});
       $sth->bindParam(':updatedby', $input->{'updatedby'});
       $sth->bindParam(':supportneed', $supportneed);
-      $sth->bindParam(':body', $input->{'body'});
+      $sth->bindParam(':body', $enc_body);
+      $sth->bindParam(':iv', $enc_iv);
       $sth->execute();
       //echo $sth->rowCount();
       return $this->dbh->lastInsertId(); //works without parameter as the id column is clear
@@ -476,7 +768,7 @@ class DB {
   public function selectSurvey($survey) {
     $dbschm = $this->dbschm;
     $sql = "
-      SELECT id,updated,updatedby,messageflow,starttime,endtime
+      SELECT id,updated,updatedby,starttime,endtime,config,status,contacts
       FROM $dbschm.survey
     ";
     if ($survey) {
@@ -488,7 +780,17 @@ class DB {
       $sth->bindParam(':survey', $survey);
     }
     $sth->execute();
-    return $sth->fetchAll(PDO::FETCH_ASSOC);
+    // modify for return
+    $rows = $sth->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rows as $rownum => &$row) { //nb! will modify data in loop hence "&"
+      if (array_key_exists('config', $row)) {
+        $row['config'] = json_decode($row['config']);
+      }
+      if (array_key_exists('contacts', $row)) {
+        $row['contacts'] = json_decode($row['contacts']);
+      }
+    }
+    return $rows;
   }
 
   public function insertSurvey($survey,$input) {
@@ -497,13 +799,10 @@ class DB {
     if ($survey) {
       if (!array_key_exists('updated', $input)) {
         //$input->{'updated'} = date('Y-m-d G:i:s');
-        $input->{'updated'} = date_format(date_create(),"Y-m-d H:i:s.v")." UTC"; //TODO figure out TZ thingy
+        $input->{'updated'} = date_format(date_create(),"Y-m-d H:i:s.v");
       }
       if (!array_key_exists('updatedby', $input)) {
         $input->{'updatedby'} = "Annie";
-      }
-      if (!array_key_exists('messageflow', $input)) {
-        return false;
       }
       if (!array_key_exists('starttime', $input)) {
         return false;
@@ -519,16 +818,18 @@ class DB {
       $sth->execute();
       if ($sth->rowCount() == 0) {
         $sql = "
-          INSERT INTO $dbschm.survey (id,updated,updatedby,messageflow,starttime,endtime)
-          VALUES (:survey,:updated,:updatedby,:messageflow,:starttime,:endtime)
+          INSERT INTO $dbschm.survey (id,updated,updatedby,starttime,endtime,config,status,contacts)
+          VALUES (:survey,:updated,:updatedby,:starttime,:endtime,:config,:status,:contacts)
         ";
         $sth = $this->dbh->prepare($sql);
         $sth->bindParam(':survey', $survey);
         $sth->bindParam(':updated', $input->{'updated'});
         $sth->bindParam(':updatedby', $input->{'updatedby'});
-        $sth->bindParam(':messageflow', $input->{'messageflow'});
         $sth->bindParam(':starttime', $input->{'starttime'});
         $sth->bindParam(':endtime', $input->{'endtime'});
+        $sth->bindParam(':config', $input->{'config'});
+        $sth->bindParam(':status', $input->{'status'});
+        $sth->bindParam(':contacts', $input->{'contacts'});
         $sth->execute();
         //echo $sth->rowCount();
         return $survey; // return given id back indicating success
@@ -538,28 +839,139 @@ class DB {
     return false;
   }
 
+
+  public function updateSurvey($survey,$input) {
+    $dbschm = $this->dbschm;
+    if ($survey) {
+      if (!array_key_exists('updated', $input)) {
+        $input->{'updated'} = date_format(date_create(),"Y-m-d H:i:s.v");
+      }
+      if (!array_key_exists('updatedby', $input)) {
+        $input->{'updatedby'} = "Annie";
+      }
+      if (!array_key_exists('starttime', $input)) {
+        return false;
+      }
+      if (!array_key_exists('endtime', $input)) {
+        return false;
+      }
+      if (!array_key_exists('config', $input)) {
+        $input->{'config'} = null;
+      }
+      if (!array_key_exists('status', $input)) {
+        $input->{'status'} = null;
+      }
+      if (!array_key_exists('contacts', $input)) {
+        $input->{'contacts'} = null;
+      }
+
+      // does it exist already
+      $sql = "
+        UPDATE $dbschm.survey
+        SET updated=:updated, updatedby=:updatedby
+        , starttime=:starttime, endtime=:endtime
+        , config=:config, status=:status, contacts=:contacts
+        WHERE id = :survey
+      ";
+      $sth = $this->dbh->prepare($sql);
+      $sth->bindParam(':updated', $input->{'updated'});
+      $sth->bindParam(':updatedby', $input->{'updatedby'});
+      $sth->bindParam(':starttime', $input->{'starttime'});
+      $sth->bindParam(':endtime', $input->{'endtime'});
+      $sth->bindParam(':config', $input->{'config'});
+      $sth->bindParam(':status', $input->{'status'});
+      $sth->bindParam(':contacts', $input->{'contacts'});
+      $sth->bindParam(':survey', $survey);
+      $sth->execute();
+      if ($sth->rowCount()===1) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // nb! this is really scary to do due to cascade delete!
+  /*
+  public function deleteSurvey($survey) {
+    $dbschm = $this->dbschm;
+    if ($survey) {
+      $sql = "DELETE FROM $dbschm.survey WHERE id = :survey";
+      $sth = $this->dbh->prepare($sql);
+      $sth->bindParam(':survey', $survey);
+      $sth->execute();
+      //echo $sth->rowCount();
+      return true;
+    }
+    return false;
+  }
+  //*/
+
   //
   // ADDITIONAL / HELPING FUNCTIONS
   //
 
-  public function selectContactKey($phonenumber) {
+  // FLOWENGINE / WATCH
+
+  public function selectContactId($phonenumber) {
     $dbschm = $this->dbschm;
-    $sql = "SELECT id as key FROM $dbschm.contact WHERE contact->>'phonenumber' = :phonenumber ";
+    // must fetch all since queried data is encrypted (todo how to limit)
+    $sql = "SELECT id, contact, iv FROM $dbschm.contact ";
     // excecute SQL statement
     $sth = $this->dbh->prepare($sql);
-    $sth->bindParam(':phonenumber', $phonenumber);
     $sth->execute();
-    return $sth->fetchAll(PDO::FETCH_ASSOC);
+    // for return
+    $ret = array();
+    $rows = $sth->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rows as $rownum => $row) {
+      $iv = null;
+      if (array_key_exists('iv', $row)) {
+        $iv = base64_decode($row['iv']);
+      }
+      if (array_key_exists('contact', $row)) {
+        $contactdata = json_decode($this->decrypt($row['contact'],$iv));
+        $dataphonenumber = $contactdata->{'phonenumber'};
+        if ($dataphonenumber) {
+          if ($dataphonenumber == $phonenumber) {
+            array_push($ret,["id" => $row["id"]]);
+            break;
+          }
+        }
+      }
+    }
+    return $ret;
   }
 
-  public function selectContactLastContactsurvey($contact) {
+  public function selectLastContactsurvey($contact) {
     $dbschm = $this->dbschm;
     if ($contact) {
       // for listing all latest data
       // take only one (the last one) for contact
-      $sql = "SELECT id,updated,updatedby,contact,survey,status FROM $dbschm.contactsurvey ";
-      $sql.= " WHERE contact = :contact ";
-      $sql.= " ORDER BY updated DESC LIMIT 1 ";
+      $sql = "
+        SELECT cs.id,cs.updated,cs.updatedby,cs.contact
+        , case
+          -- grace period, delay for last message, choose whatever was -active- recently
+          when cs.updated > current_timestamp - make_interval(hours := cast(config.value as int)) then cs.survey
+          -- contactsurvey has ended -> Y
+          when cs.status='100' then 'Y'
+          -- entire survey has ended -> Y
+          when su.endtime < current_timestamp then 'Y'
+          else cs.survey
+          end survey
+        , case
+          -- grace period, delay for last message, choose whatever was -active- recently
+          when cs.updated > current_timestamp - make_interval(hours := cast(config.value as int)) then cs.status
+          -- contactsurvey has ended -> start (Y)
+          when cs.status='100' then 'Y'
+          -- entire survey has ended -> start (Y)
+          when su.endtime < current_timestamp then 'Y'
+          else cs.status
+          end status -- or category!
+        FROM $dbschm.contactsurvey cs
+        JOIN $dbschm.survey su on su.id=cs.survey
+        JOIN $dbschm.config ON config.segment='survey' and config.field='lastMessageDelay'
+        WHERE cs.contact = :contact
+        ORDER BY updated DESC LIMIT 1
+      ";
       // excecute SQL statement
       $sth = $this->dbh->prepare($sql);
       $sth->bindParam(':contact', $contact);
@@ -569,56 +981,73 @@ class DB {
     return false;
   }
 
-  public function selectContactMessages($contact) {
+  public function selectSurveyConfig($survey) {
     $dbschm = $this->dbschm;
-    $sql = "
-      SELECT id,updated,updatedby,contact,body,sender,survey
-      FROM $dbschm.message
-    ";
-    if ($contact) {
-      $sql.= " WHERE contact = :contact ";
+    // for listing all data
+    $sql = "SELECT id,config,starttime,endtime,status FROM $dbschm.survey WHERE 1=1 ";
+    if ($survey) {
+      $sql.= " AND id = :survey ";
     }
     // excecute SQL statement
     $sth = $this->dbh->prepare($sql);
-    if ($contact) {
-      $sth->bindParam(':contact', $contact);
+    if ($survey) {
+      $sth->bindParam(':survey', $survey);
     }
     $sth->execute();
     return $sth->fetchAll(PDO::FETCH_ASSOC);
   }
 
-  public function selectContactAndSupportneeds($contact) {
+  // OTHER
+
+  public function selectContactMessages($contact) {
     $dbschm = $this->dbschm;
     $sql = "
-      SELECT id,contact
-      ,(select array_to_json(array_agg(t))
-        from (
-          select sn.*,sv.messageflow,sv.starttime,sv.endtime
-          from $dbschm.supportneed sn
-          join $dbschm.survey sv on sv.id=sn.survey
-          where sn.contact=contact.id
-        ) t
-      ) as supportneeds
-      FROM $dbschm.contact
+      SELECT m.id,m.updated,m.updatedby,m.contact,m.body,m.sender,m.survey,m.iv
+      ,m.created,m.createdby
+      FROM $dbschm.message m
+      WHERE (m.contact,m.survey) in (
+        select sn.contact, sn.survey
+        from $dbschm.supportneed sn
+        where(1=0
+          or (
+            select au.superuser
+            from $dbschm.annieuser au
+            where au.id = :auth_uid
+          )
+          or (
+            select j.value::boolean
+            from $dbschm.annieusersurvey aus
+            cross join jsonb_each(aus.meta->'category') j
+            where aus.meta is not null and aus.meta->'category' is not null
+            and aus.annieuser = :auth_uid
+            and aus.survey = sn.survey
+            and j.key = sn.category
+          )
+        )
+      )
     ";
     if ($contact) {
-      $sql.= " WHERE id = :contact";
+      $sql.= " AND m.contact = :contact ";
     }
-    // prepare SQL statement
+    // excecute SQL statement
     $sth = $this->dbh->prepare($sql);
+    $sth->bindParam(':auth_uid',$this->auth_uid);
     if ($contact) {
       $sth->bindParam(':contact', $contact);
     }
-    // excecute SQL statement
     $sth->execute();
     // modify for return
     $rows = $sth->fetchAll(PDO::FETCH_ASSOC);
     foreach ($rows as $rownum => &$row) { //nb! will modify data in loop hence "&"
-      if (array_key_exists('contact', $row)) {
-        $row['contact'] = json_decode($row['contact']);
+      $iv = null;
+      if (array_key_exists('iv', $row)) {
+        $iv = base64_decode($row['iv']);
       }
-      if (array_key_exists('supportneeds', $row)) {
-        $row['supportneeds'] = json_decode($row['supportneeds']);
+      if (array_key_exists('body', $row)) {
+        $row['body'] = $this->decrypt($row['body'],$iv);
+      }
+      if (array_key_exists('sender', $row)) {
+        $row['sender'] = $this->decrypt($row['sender'],$iv);
       }
     }
     return $rows;
@@ -647,49 +1076,48 @@ class DB {
     return $sth->fetchAll(PDO::FETCH_ASSOC);
   }
 
-  public function selectContactSupportneeds($contact,$history,$getarr) {
+  public function selectSupportneedsPage($contact,$history,$getarr) {
     $dbschm = $this->dbschm;
 
     $in_category = implode(',', array_fill(0, count($getarr["category"]), '?'));
     $in_status   = implode(',', array_fill(0, count($getarr["status"]), '?'));
     $in_survey   = implode(',', array_fill(0, count($getarr["survey"]), '?'));
     $in_userrole = implode(',', array_fill(0, count($getarr["userrole"]), '?'));
-    $in_degree   = implode(',', array_fill(0, count($getarr["degree"]), '?'));
-    $in_group    = implode(',', array_fill(0, count($getarr["group"]), '?'));
-    $in_location = implode(',', array_fill(0, count($getarr["location"]), '?'));
-    //error_log("inQueries: (".$in_category.") / (".$in_status.") / (".$in_survey.") / (".$in_userrole.") // (".$in_degree.") / (".$in_group.") / (".$in_location.")");
-    //error_log("inArrays length: ".count(array_merge($getarr["category"],$getarr["status"],$getarr["survey"],$getarr["userrole"], $getarr["degree"],$getarr["group"],$getarr["location"])));
+    //error_log("inQueries: (".$in_category.") / (".$in_status.") / (".$in_survey.") / (".$in_userrole.")");
+    //error_log("inArrays length: ".count(array_merge($getarr["category"],$getarr["status"],$getarr["survey"],$getarr["userrole"])));
 
     // for listing all latest data
-    // nb! surveystatus subquery, which is actually contact+survey based, we intentionally get per contact here
-    //     table also contains all history so we want to limit the result to the one that is latest for contact.
-    //     note also default value of '100' meaning resolved (todo: should fetch from codes table, actually)
     $sql = "
       SELECT sn.id
       ,sn.updated,sn.updatedby
       ,sn.contact,sn.category,sn.status,sn.survey
       ,sn.userrole
-      ,su.messageflow,su.starttime,su.endtime
-      ,coalesce((
-        select cs.status from $dbschm.contactsurvey cs
-        where cs.contact=sn.contact
-        order by cs.updated desc
-        limit 1
-      ),'100') as surveystatus
-      ,co.contact as contactdata
+      ,su.starttime,su.endtime
       FROM $dbschm.supportneed sn
       JOIN $dbschm.survey su ON su.id=sn.survey
-      JOIN $dbschm.contact co ON co.id=sn.contact
       WHERE 1=1
+      AND(1=0
+        or (
+          select au.superuser
+          from $dbschm.annieuser au
+          where au.id = ?
+        )
+        or (
+          select j.value::boolean
+          from $dbschm.annieusersurvey aus
+          cross join jsonb_each(aus.meta->'category') j
+          where aus.meta is not null and aus.meta->'category' is not null
+          and aus.annieuser = ?
+          and aus.survey = sn.survey
+          and j.key = sn.category
+        )
+      )
     ";
-    if ($contact)      $sql.= " AND sn.contact = :contact";
+    if ($contact)      $sql.= " AND sn.contact = ?";
     if ($in_category)  $sql.= " AND sn.category in ($in_category)";//part of list of strings
     if ($in_status)    $sql.= " AND sn.status in ($in_status)";//part of list of strings
     if ($in_survey)    $sql.= " AND sn.survey in ($in_survey)";//part of list of strings
     if ($in_userrole)  $sql.= " AND sn.userrole in ($in_userrole)";//part of list of strings
-    if ($in_degree)    $sql.= " AND co.contact->>'degree' in ($in_degree)";//part of list of strings
-    if ($in_group)     $sql.= " AND co.contact->>'group' in ($in_group)";//part of list of strings
-    if ($in_location)  $sql.= " AND co.contact->>'location' in ($in_location)";//part of list of strings
 
     if ($history) {
       // take only history, since the last one is there also!
@@ -698,57 +1126,43 @@ class DB {
         ,sn.updated,sn.updatedby
         ,sn.contact,sn.category,sn.status,sn.survey
         ,sn.userrole
-        ,su.messageflow,su.starttime,su.endtime
-        ,coalesce((
-          select cs.status from $dbschm.contactsurvey cs
-          where cs.contact=sn.contact
-          order by cs.updated desc
-          limit 1
-        ),'100') as surveystatus
-        ,co.contact as contactdata
+        ,su.starttime,su.endtime
         FROM $dbschm.supportneedhistory sn
         JOIN $dbschm.survey su ON su.id=sn.survey
-        JOIN $dbschm.contact co ON co.id=sn.contact
-        WHERE sn.contact = :contact
+        WHERE 1=1
+        AND(1=0
+          or (
+            select au.superuser
+            from $dbschm.annieuser au
+            where au.id = ?
+          )
+          or (
+            select j.value::boolean
+            from $dbschm.annieusersurvey aus
+            cross join jsonb_each(aus.meta->'category') j
+            where aus.meta is not null and aus.meta->'category' is not null
+            and aus.annieuser = ?
+            and aus.survey = sn.survey
+            and j.key = sn.category
+          )
+        )
+        AND sn.contact = ?
       ";
     }
     // excecute SQL statement
-    //error_log("SQL: ".$sql);
     $sth = $this->dbh->prepare($sql);
     // bind parameters/values for both queries (length of array matters)
     // first "key" as named then the rest of them from specialized array(s) for each '?'
     $sqlparams = [];
+    $sqlparams = array_merge($sqlparams,[$this->auth_uid,$this->auth_uid]);
     if ($contact) {
-      $sqlparams = array_merge($sqlparams,['contact'=>$contact]);
+      $sqlparams = array_merge($sqlparams,[$contact]);
     }
     $sth->execute(array_merge(
       $sqlparams,
       $getarr["category"],$getarr["status"],$getarr["survey"],
-      $getarr["userrole"], $getarr["degree"],$getarr["group"],$getarr["location"]
+      $getarr["userrole"]
     ));
-    // modify for return
-    $rows = $sth->fetchAll(PDO::FETCH_ASSOC);
-    foreach ($rows as $rownum => &$row) { //nb! will modify data in loop hence "&"
-      if (array_key_exists('contactdata', $row)) {
-        $row['contactdata'] = json_decode($row['contactdata']);
-      }
-    }
-    return $rows;
-  }
-
-  public function selectSurveyConfig($survey) {
-    $dbschm = $this->dbschm;
-    // for listing all data
-    $sql = "SELECT id,config FROM $dbschm.survey WHERE 1=1 ";
-    if ($survey) {
-      $sql.= " AND id = :survey ";
-    }
-    // excecute SQL statement
-    $sth = $this->dbh->prepare($sql);
-    if ($survey) {
-      $sth->bindParam(':survey', $survey);
-    }
-    $sth->execute();
     return $sth->fetchAll(PDO::FETCH_ASSOC);
   }
 

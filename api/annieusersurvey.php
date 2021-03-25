@@ -1,14 +1,12 @@
 <?php
-/* metadata.php
- * Copyright (c) 2019-2021 Annie Advisor
+/* annieusersurvey.php
+ * Copyright (c) 2020-2021 Annie Advisor
  * All rights reserved.
  * Contributors:
  *  Lauri Jokipii <lauri.jokipii@annieadvisor.com>
  *
  * Backend script between AnnieUI and Annie database.
  * Before database there is authentication check.
- *
- * NB! This metadata API is for only getting numbers and such.
  */
 
 require_once('settings.php');//->settings,db*
@@ -21,7 +19,7 @@ require 'http_response_code.php';
 
 $headers = array();
 $headers[]='Access-Control-Allow-Headers: Content-Type';
-$headers[]='Access-Control-Allow-Methods: OPTIONS, GET';//, PUT, POST, DELETE';
+$headers[]='Access-Control-Allow-Methods: OPTIONS, GET, PUT, POST, DELETE';
 $headers[]='Access-Control-Allow-Origin: *';
 $headers[]='Access-Control-Allow-Credentials: true';
 $headers[]='Access-Control-Max-Age: 1728000';
@@ -43,6 +41,7 @@ $request = array();
 if (isset($_SERVER['PATH_INFO'])) {
   $request = explode('/', trim($_SERVER['PATH_INFO'],'/'));
 }
+$input = json_decode(file_get_contents('php://input'));
 
 $key = null;
 if (count($request)>=1) {
@@ -52,17 +51,44 @@ if (count($request)>=1) {
 // create SQL based on HTTP method
 switch ($method) {
   case 'GET':
-    $ret = $anniedb->selectContactMeta($key);
+    $ret = $anniedb->selectAnnieusersurvey($key);
     if ($ret !== false) {
       http_response_code(200);
-      echo json_encode($ret[0]); // return 1 (1st) row always (no list)
+      echo json_encode($ret);
     }
     break;
   case 'PUT':
+    if ($key && $input) {
+      $ret = $anniedb->updateAnnieusersurvey($key,$input);
+      if ($ret !== false) {
+        http_response_code(200);
+        echo json_encode(array("status"=>"OK"));
+      } else {
+        echo json_encode(array("status"=>"FAILED"));
+      }
+    }
+    break;
   case 'POST':
+    if ($input) {
+      $ret = $anniedb->insertAnnieusersurvey($input);
+      if ($ret !== false) {
+        http_response_code(200);
+        echo json_encode(array("status"=>"OK", "id"=>$ret));
+      } else {
+        echo json_encode(array("status"=>"FAILED"));
+      }
+    }
+    break;
   case 'DELETE':
-    http_response_code(405); // Method Not Allowed
-    exit;
+    if ($key) {
+      $ret = $anniedb->deleteAnnieusersurvey($key);
+      if ($ret !== false) {
+        http_response_code(200);
+        echo json_encode(array("status"=>"OK"));
+      } else {
+        echo json_encode(array("status"=>"FAILED"));
+      }
+    }
     break;
 }
 

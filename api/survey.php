@@ -1,6 +1,6 @@
 <?php
 /* survey.php
- * Copyright (c) 2019,2020 Annie Advisor
+ * Copyright (c) 2019-2021 Annie Advisor
  * All rights reserved.
  * Contributors:
  *  Lauri Jokipii <lauri.jokipii@annieadvisor.com>
@@ -13,7 +13,7 @@ require_once('settings.php');//->settings,db*
 require_once('auth.php');
 
 require_once('anniedb.php');
-$anniedb = new Annie\Advisor\DB($dbhost,$dbport,$dbname,$dbschm,$dbuser,$dbpass);
+$anniedb = new Annie\Advisor\DB($dbhost,$dbport,$dbname,$dbschm,$dbuser,$dbpass,$salt);
 
 require 'http_response_code.php';
 
@@ -58,6 +58,16 @@ switch ($method) {
     }
     break;
   case 'PUT':
+    if ($key && $input) {
+      $ret = $anniedb->updateSurvey($key,$input);
+      if ($ret !== false) {
+        http_response_code(200);
+        echo json_encode(array("status"=>"OK"));
+      } else {
+        echo json_encode(array("status"=>"FAILED"));
+      }
+    }
+    break;
   case 'POST':
     if ($key && $input) {
       //nb! "users problem": key (survey.id) must be given since database does not generate ids for survey

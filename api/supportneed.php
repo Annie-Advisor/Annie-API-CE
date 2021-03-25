@@ -1,6 +1,6 @@
 <?php
 /* supportneed.php
- * Copyright (c) 2019,2020 Annie Advisor
+ * Copyright (c) 2019-2021 Annie Advisor
  * All rights reserved.
  * Contributors:
  *  Lauri Jokipii <lauri.jokipii@annieadvisor.com>
@@ -15,7 +15,7 @@ require_once('settings.php');//->settings,db*
 require_once('auth.php');
 
 require_once('anniedb.php');
-$anniedb = new Annie\Advisor\DB($dbhost,$dbport,$dbname,$dbschm,$dbuser,$dbpass);
+$anniedb = new Annie\Advisor\DB($dbhost,$dbport,$dbname,$dbschm,$dbuser,$dbpass,$salt);
 
 require 'http_response_code.php';
 
@@ -75,7 +75,7 @@ if (count($request)>=1) {
 // use _SERVER['QUERY_STRING'] instead of _GET
 //error_log("QUERY_STRING: ".$_SERVER['QUERY_STRING']);
 # get parametees as an array
-$getarr = array("category"=>[],"status"=>[],"survey"=>[],"userrole"=>[], "degree"=>[],"group"=>[],"location"=>[]);
+$getarr = array("category"=>[],"status"=>[],"survey"=>[],"userrole"=>[]);
 # split on outer delimiter
 $pairs = explode('&', $_SERVER['QUERY_STRING']);
 # loop through each pair
@@ -105,7 +105,7 @@ foreach ($pairs as $i) {
 switch ($method) {
   case 'GET':
     //to-do-ish: "normal" selectSupportneed?
-    $ret = $anniedb->selectContactSupportneeds($key,$history,$getarr);
+    $ret = $anniedb->selectSupportneedsPage($key,$history,$getarr);
     if ($ret !== false) {
       http_response_code(200);
       echo json_encode($ret);

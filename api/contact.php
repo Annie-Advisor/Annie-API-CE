@@ -1,6 +1,6 @@
 <?php
 /* contact.php
- * Copyright (c) 2019,2020 Annie Advisor
+ * Copyright (c) 2019-2021 Annie Advisor
  * All rights reserved.
  * Contributors:
  *  Lauri Jokipii <lauri.jokipii@annieadvisor.com>
@@ -15,7 +15,7 @@ require_once('settings.php');//->settings,db*
 require_once('auth.php');
 
 require_once('anniedb.php');
-$anniedb = new Annie\Advisor\DB($dbhost,$dbport,$dbname,$dbschm,$dbuser,$dbpass);
+$anniedb = new Annie\Advisor\DB($dbhost,$dbport,$dbname,$dbschm,$dbuser,$dbpass,$salt);
 
 require 'http_response_code.php';
 
@@ -53,7 +53,7 @@ if (count($request)>=1) {
 // create SQL based on HTTP method
 switch ($method) {
   case 'GET':
-    $ret = $anniedb->selectContactAndSupportneeds($key);
+    $ret = $anniedb->selectContact($key);
     if ($ret !== false) {
       http_response_code(200);
       echo json_encode($ret);

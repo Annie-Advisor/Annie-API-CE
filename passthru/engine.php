@@ -1,6 +1,6 @@
 <?php
 /* engine.php
- * Copyright (c) 2019,2020 Annie Advisor
+ * Copyright (c) 2019-2021 Annie Advisor
  * All rights reserved.
  * Contributors:
  *  Lauri Jokipii <lauri.jokipii@annieadvisor.com>
@@ -14,7 +14,14 @@ require_once '../api/settings.php';//->settings,db*
 //no auth, ip restriction
 
 require_once '../api/anniedb.php';
-$anniedb = new Annie\Advisor\DB($dbhost,$dbport,$dbname,$dbschm,$dbuser,$dbpass);
+$anniedb = new Annie\Advisor\DB($dbhost,$dbport,$dbname,$dbschm,$dbuser,$dbpass,$salt);
+/* + db for specialized "unauthorized" query */
+try {
+  $dbh = new PDO("pgsql: host=$dbhost; port=$dbport; dbname=$dbname", $dbuser, $dbpass);
+} catch (PDOException $e) {
+  die("Something went wrong while connecting to database: " . $e->getMessage() );
+}
+/* - db */
 
 $smsapiuri = $settings['sms']['apiuri'];
 $smsapikey = $settings['sms']['apikey'];
@@ -66,6 +73,138 @@ if (isset($_SERVER['CONTENT_TYPE'])
   // not quite sure these are needed!
   $input = json_decode($input);
 }
+
+//
+//
+//
+
+function getPossiblePhases($currentphase,$flow) {
+  $possiblephases = array();
+  foreach ($flow as $fk => $fv) {
+    if (preg_match('/^branch.*$/i', $fk)) {
+      $phasecandidate_ = substr($fk,strlen("branch"));
+      // direct children
+      array_push($possiblephases,$phasecandidate_);
+      // next level(s)
+      foreach ($fv as $ffk => $ffv) {
+        if (preg_match('/^branch.*$/i', $ffk)) {
+          $phasecandidate__ = substr($ffk,strlen("branch"));
+          if ($currentphase == $phasecandidate_) {// parent phase
+            array_push($possiblephases,$phasecandidate__);
+          }
+        } elseif ($ffk == "other") {
+          if ($currentphase == $phasecandidate_) {// parent phase
+            array_push($possiblephases,$phasecandidate_);
+          }
+        }
+      }
+      $possiblephases = array_merge($possiblephases,getPossiblePhases($currentphase,$fv));
+    } elseif ($fk == "other") {
+      if (in_array($currentphase,array("1","2"))) { // root phases
+        array_push($possiblephases,$currentphase);
+      }
+    }
+  }
+  return $possiblephases;
+}
+function getPhaseAction($currentphase,$possiblephases,$text,$flow) {
+  $nextphase = null;
+  $nextmessage = null;
+  $currentphaseconfig = null; //for checking next nextphase
+  $dosupportneed = false;
+
+  // root level
+  //A, B, C...
+  foreach ($flow as $fk => $fv) {
+    if (strpos($fk,"branch") !== false && array_key_exists("condition", $fv)) {
+      $phasecandidate_ = substr($fk,strlen("branch"));
+      $pattern = "/".$fv->{'condition'}."/";
+      //todo: check $possiblephases
+      if (in_array($currentphase, array("1","2"))) {
+        if (preg_match($pattern, $text)) { //nb! improve me!
+          $nextmessage = $fv->{'message'};
+          $nextphase = $phasecandidate_;
+          $currentphaseconfig = $fv;
+          if (array_key_exists("supportneed", $fv) && $fv->{'supportneed'}) {
+            $dosupportneed = true;
+          }
+          //break 1;//stop all
+          return array($nextmessage,$nextphase,$currentphaseconfig,$dosupportneed);
+        }
+      } elseif ($currentphase == $phasecandidate_) {
+        // next level
+        //A1, A2...
+        foreach ($fv as $ffk => $ffv) {
+          if (strpos($ffk,"branch") !== false && array_key_exists("condition", $ffv)) {
+            $phasecandidate__ = substr($ffk,strlen("branch"));
+            $pattern = "/".$ffv->{'condition'}."/";
+            //todo: check $possiblephases
+            if (preg_match($pattern, $text)) { //nb! improve me!
+              $nextmessage = $ffv->{'message'};
+              $nextphase = $phasecandidate__;
+              $currentphaseconfig = $ffv;
+              //todo: next level?
+              if ($ffv->{'supportneed'}) {
+                $dosupportneed = true;
+              }
+              //break 2;//stop all
+              return array($nextmessage,$nextphase,$currentphaseconfig,$dosupportneed);
+            }
+          }
+        }//-loop fv
+        // no match above for subphase, but we are in currentphase
+        // so SUB.other if exists
+        if (!$nextphase) {
+          if (array_key_exists('other', $fv)) {
+            $ffv = $fv->{'other'};
+            if (gettype($ffv)=="object" && array_key_exists('message', $ffv)) {
+              $nextmessage = $ffv->{'message'};
+              $nextphase = $phasecandidate_;
+              $currentphaseconfig = $fv;
+            }
+            if (array_key_exists('supportneed', $ffv) && $ffv->{'supportneed'}) {
+              $dosupportneed = true;
+            }
+            //break 1;//stop this (flow)
+            return array($nextmessage,$nextphase,$currentphaseconfig,$dosupportneed);
+          }
+        }
+      } else {
+        // recursively find next levels
+        $nextnextphaseexists = false;
+        foreach ($fv as $ffk => $ffv) {
+          if (strpos($ffk,"branch") !== false) {
+            $nextnextphaseexists = true;
+          }
+        }
+        if ($nextnextphaseexists) {
+          list ($nextmessage,$nextphase,$currentphaseconfig,$dosupportneed) = getPhaseAction($currentphase,$possiblephases,$text,$fv);
+        }
+      }
+    }//-branch
+  }//-loop flow
+  // no match above
+  if (!$nextphase) {
+    if (in_array($currentphase,array("1","2"))) { // root phases
+      if (gettype($flow)=="object" && array_key_exists("other", $flow)) {
+        $fv = $flow->{'other'};
+        if (gettype($fv)=="object" && array_key_exists('message', $fv)) {
+          $nextmessage = $fv->{'message'};
+          $nextphase = $currentphase;
+          $currentphaseconfig = $flow;
+        }
+        if (array_key_exists('supportneed', $fv) && $fv->{'supportneed'}) {
+          $dosupportneed = true;
+        }
+      }
+    }  //"else" phase with no next or other (typically everything OK)
+  }
+  return array($nextmessage,$nextphase,$currentphaseconfig,$dosupportneed);
+}
+
+//
+//
+//
 
 // go based on HTTP method
 $areyouokay = true; // status of process here
@@ -121,7 +260,7 @@ switch ($method) {
       }
       //dev:
       else {
-        $sendtime = date_format(date_create(),"Y-m-d\TH:i:s.v\Z");
+        $sendtime = date_format(date_create(),"Y-m-d\TH:i:s.v");
       }
       if (array_key_exists('status', $input)) {
         $status = $input->{'status'};
@@ -158,7 +297,7 @@ switch ($method) {
       // for example "A"
       //  -> (db)message
       //  "Choice ?"
-      //    substring(".response[?]",len("response")) == ",?,"
+      //    substring(".response[?]",len("branch")) == ",?,"
       //  "hit"
       //  -> sendSMS(+db) .message
       //  if .response[?].supportneed:
@@ -185,7 +324,7 @@ switch ($method) {
         $annienumber = "";
         $contactnumber = "";
         
-        $key = null;
+        $contactid = null;
 
         $flow = null;
         $nextphase = null;
@@ -195,195 +334,116 @@ switch ($method) {
         $possiblephases = array();
         $dosupportneed = false;
 
-        // figure out contact id (key) from destination/sender number
-        $contactkeys = json_decode(json_encode($anniedb->selectContactKey($destination)));
-        if (count($contactkeys)>0) {
+        // figure out contactid from destination/sender number
+        $contactids = json_decode(json_encode($anniedb->selectContactId($destination)));
+        if (count($contactids)>0) {
           $contactnumber = $destination;
           $annienumber = $sender;
-          $key = $contactkeys[0]->{'key'};
+          $contactid = $contactids[0]->{'id'};
         } else {
-          $contactkeys = json_decode(json_encode($anniedb->selectContactKey($sender)));
-          if (count($contactkeys)>0) {
+          $contactids = json_decode(json_encode($anniedb->selectContactId($sender)));
+          if (count($contactids)>0) {
             $contactnumber = $sender;
             $annienumber = $destination;
-            $key = $contactkeys[0]->{'key'};
+            $contactid = $contactids[0]->{'id'};
           } else {
             $areyouokay = false;
-            error_log("FAILED: Engine: action: FAILED to get key for: ".$destination);
+            error_log("FAILED: Engine: action: FAILED to get contactid for: ".$destination);
           }
         }
 
-        //error_log("DEBUG: Engine: key: ".$key);
-
-        if ($areyouokay && $key)
+        if ($areyouokay && $contactid)
         {
-          $contacts = json_decode(json_encode($anniedb->selectContact($key)));
+          $contacts = json_decode(json_encode($anniedb->selectContact($contactid)));
           $contact = $contacts[0]->{'contact'};
 
           // figure out survey from contact
-          $contactsurveys = json_decode(json_encode($anniedb->selectContactLastContactsurvey($key)));
+          $contactsurveys = json_decode(json_encode($anniedb->selectLastContactsurvey($contactid)));
           // ...test if there is such info...
           // ...especially if there is not: (do supporneed Y)
-          if (count($contactsurveys)==0 || (count($contactsurveys)==1 && $contactsurveys[0]->{'status'} == "100")) {
-            $category = "Y"; // Student initiated
-            $survey = "Y"; // Student initiated, used at the end also
+          if (count($contactsurveys)==0) {
 
+            $survey = "Y"; // Student initiated, used at the end also
             $surveyconfigs = json_decode(json_encode($anniedb->selectSurveyConfig($survey))); // just "Y"
             foreach ($surveyconfigs[0] as $jk => $jv) {//nb! should be only one!
               if ("config" == $jk) { //must have
                 $flow = json_decode($jv);
-                if (array_key_exists("other", $flow)) {
-                  $fv = $flow->{"other"};
-                  if (array_key_exists("message", $fv)) {
-                    $nextmessage = $fv->{"message"};
-                  }
-                  if (array_key_exists("supportneed", $fv) && $fv->{'supportneed'}) {
-                    $dosupportneed = true;
-                  }
+                if (array_key_exists("message", $flow)) {
+                  $nextmessage = $flow->{"message"};
                 }
+                // we are at "initiate" level in this case
+                $nextphase = "1";
+                $possiblephases = getPossiblePhases("1",json_decode($jv));
+                $currentphaseconfig = $flow;
+                $dosupportneed = false;
               }
             }
 
-            // nextphase is actually end (100) here since this is not an actual survey but situation is handled at the
-            $nextphase = "Y";
-            $possiblephases = array("Y");
-
           } else { // there is contactsurvey
 
-            //todo: test contactsurvey.status here?
+            // can we proceed
+            // - phase we are at (currentphase)
+            $currentphase = $contactsurveys[0]->{'status'};
 
             $survey = $contactsurveys[0]->{'survey'};
             $surveyconfigs = json_decode(json_encode($anniedb->selectSurveyConfig($survey)));
 
-            // ...and now we should know what we need
-            // - contact, survey and message (text)
-
-            // do the flow magic; figure out:
-            // - phase we are at (currentphase)
-            // - which phases are possible (possiblephases)
-            // - what do we actually do (nextphase, dosupportneed)
-
-            // can we proceed
-            $currentphase = $contactsurveys[0]->{'status'};
-
-            // loop surveyconfig, phases
-            // - get possible phases for current status
+            // loop surveyconfig, validity (times, status)
+            $surveystarttime = null;
+            $surveyendtime = null;
             foreach ($surveyconfigs[0] as $jk => $jv) {//nb! should be only one!
-              if ("config" == $jk) { //must have
-                $flow = json_decode($jv);
-                // root level
-                //A, B, C...
-                foreach ($flow as $fk => $fv) {
-                  if (preg_match('/^response.*$/i', $fk)) {
-                    $phasecandidate_ = substr($fk,strlen("response"));
-                    if (in_array($currentphase,array("1","2"))) { // root phases
-                      array_push($possiblephases,$phasecandidate_);
-                    }
-                    // next level
-                    //A1, A2...
-                    foreach ($fv as $ffk => $ffv) {
-                      if (preg_match('/^response.*$/i', $ffk)) {
-                        $phasecandidate__ = substr($ffk,strlen("response"));
-                        if ($currentphase == $phasecandidate_) {// parent phase
-                          array_push($possiblephases,$phasecandidate__);
-                        }
-                      } elseif ($ffk == "other") {
-                        if ($currentphase == $phasecandidate_) {// parent phase
-                          array_push($possiblephases,"$phasecandidate_.other");
-                        }
-                      }
-                    }
-                  } elseif ($fk == "other") {
-                    if (in_array($currentphase,array("1","2"))) { // root phases
-                      array_push($possiblephases,"other");
-                    }
-                  }
-                }
+              if ("starttime" == $jk) {//not null
+                $surveystarttime = date_create($jv); //to_string: date_format($surveystarttime,"Y-m-d H:i:s.v");
               }
-            }
+              if ("endtime" == $jk) {//not null
+                $surveyendtime = date_create($jv);
+              }
+            }//-loop surveyconfig
 
-            if ($text) {
-              // loop phases again but with evaluating with message received
+            // special case of "Y": for this contact this survey is over (ended) but new messages still incoming
+            if ($currentphase == "Y") { // status/category
+              // is there a default nextmessage to send and do we dosupportneed
               foreach ($surveyconfigs[0] as $jk => $jv) {//nb! should be only one!
                 if ("config" == $jk) { //must have
                   $flow = json_decode($jv);
-                  // root level
-                  //A, B, C...
-                  foreach ($flow as $fk => $fv) {
-                    if (strpos($fk,"response") !== false) {
-                      $phasecandidate_ = substr($fk,strlen("response"));
-                      $pattern = "/^$phasecandidate_.*/i";
-                      //todo: check $possiblephases
-                      if (in_array($currentphase, array("1","2"))) {
-                        if (preg_match($pattern, $text)) { //nb! improve me!
-                          $nextmessage = $fv->{'message'};
-                          $nextphase = $phasecandidate_;
-                          $currentphaseconfig = $fv;
-                          if (array_key_exists("supportneed", $fv) && $fv->{'supportneed'}) {
-                            $dosupportneed = true;
-                          }
-                          break 2;//stop all
-                        }
-                      } elseif ($currentphase == $phasecandidate_) {
-                        // next level
-                        //A1, A2...
-                        foreach ($fv as $ffk => $ffv) {
-                          if (strpos($ffk,"response") !== false) {
-                            $phasecandidate__ = substr($ffk,strlen("response"));
-                            $pattern = "/^$phasecandidate__.*/i";
-                            //todo: check $possiblephases
-                            if (preg_match($pattern, $text)) { //nb! improve me!
-                              $nextmessage = $ffv->{'message'};
-                              $nextphase = $phasecandidate__;
-                              $currentphaseconfig = $ffv;
-                              //todo: next level?
-                              if ($ffv->{'supportneed'}) {
-                                $dosupportneed = true;
-                              }
-                              break 3;//stop all
-                            }
-                          }
-                        }//-loop fv
-                        // no match above for subphase, but we are in currentphase
-                        // so SUB.other if exists
-                        if (!$nextphase) {
-                          if (array_key_exists('other', $fv)) {
-                            $ffv = $fv->{'other'};
-                            if (gettype($ffv)=="object" && array_key_exists('message', $ffv)) {
-                              $nextmessage = $ffv->{'message'};
-                              $nextphase = "$phasecandidate_.other";
-                              $currentphaseconfig = $fv;
-                            }
-                            if (array_key_exists('supportneed', $ffv) && $ffv->{'supportneed'}) {
-                              $dosupportneed = true;
-                            }
-                            break 1;//stop this (flow)
-                          }
-                        }
-                      }
-                    }//-response
-                  }//-loop flow
-                  // no match above
-                  if (!$nextphase) {
-                    if (in_array($currentphase,array("1","2"))) { // root phases
-                      if (gettype($flow)=="object" && array_key_exists("other", $flow)) {
-                        $fv = $flow->{'other'};
-                        if (gettype($fv)=="object" && array_key_exists('message', $fv)) {
-                          $nextmessage = $fv->{'message'};
-                          $nextphase = "other";
-                          $currentphaseconfig = $flow;
-                        }
-                        if (array_key_exists('supportneed', $fv) && $fv->{'supportneed'}) {
-                          $dosupportneed = true;
-                        }
-                      }
-                      break 1;//stop all
-                    }  //"else" phase with no next or other (typically A=everything OK) handled below
+                  if (array_key_exists("message", $flow)) {
+                    $nextmessage = $flow->{"message"};
                   }
-                }//-flow
+                  // we are at "initiate" level in this case
+                  $nextphase = "1";
+                  $possiblephases = getPossiblePhases("1",json_decode($jv));
+                  $currentphaseconfig = $flow;
+                  $dosupportneed = false;
+                }//-config
               }//-loop surveyconfig
-            }//-text
 
+            } else {
+
+              // ...and now we should know what we need
+              // - contact, survey and message (text)
+
+              // do the flow magic; figure out:
+              // - which phases are possible (possiblephases)
+              // - what do we actually do (nextphase, dosupportneed)
+
+              // loop surveyconfig, phases
+              // - get possible phases for current status
+              foreach ($surveyconfigs[0] as $jk => $jv) {//nb! should be only one!
+                if ("config" == $jk) { //must have
+                  $possiblephases = getPossiblePhases($currentphase,json_decode($jv));
+                }//-config
+              }//-loop surveyconfig
+
+              if ($text) {
+                // loop phases again but with evaluating with message received
+                foreach ($surveyconfigs[0] as $jk => $jv) {//nb! should be only one!
+                  if ("config" == $jk) { //must have
+                    list ($nextmessage,$nextphase,$currentphaseconfig,$dosupportneed) = getPhaseAction($currentphase,$possiblephases,$text,json_decode($jv));
+                  }//-config
+                }//-loop surveyconfig
+              }//-text
+
+            }
           }//-contactsurvey (exists)
 
           //
@@ -395,7 +455,7 @@ switch ($method) {
           if ($sender == $contactnumber) {
             $sendername = $contact->{'firstname'}." ".$contact->{'lastname'};
           }
-          $notneededmessageid = $anniedb->insertMessage($key,json_decode(json_encode(array(
+          $notneededmessageid = $anniedb->insertMessage($contactid,json_decode(json_encode(array(
             //id is generated: "id"=>?,
             "created"=>$sendtime,
             "createdby"=>"Engine",
@@ -416,7 +476,7 @@ switch ($method) {
 
           // send Annies next message (continue survey), if applicable
           if (in_array($nextphase,$possiblephases)) {
-            $areyouokay = $anniedb->insertContactsurvey($key,json_decode(json_encode(array(
+            $areyouokay = $anniedb->insertContactsurvey($contactid,json_decode(json_encode(array(
               //default: "updated"=>null,
               "updatedby"=>"Engine", //not important
               "survey"=>$survey,
@@ -429,10 +489,10 @@ switch ($method) {
 
             // make message personalized
             // replace string placeholders, like "{{ firstname }}"
-            $replaceables=preg_split('/[^{]*(\{\{ [^}]+ \}\})[^{]*/', $nextmessage, -1, PREG_SPLIT_NO_EMPTY|PREG_SPLIT_DELIM_CAPTURE);
+            $replaceables=preg_split('/[^{]*(\{\{[^}]+\}\})[^{]*/', $nextmessage, -1, PREG_SPLIT_NO_EMPTY|PREG_SPLIT_DELIM_CAPTURE);
             $personalized=$nextmessage;
             foreach ($replaceables as $replacekey) {
-              $ck = trim(str_replace("{{ ","",str_replace(" }}", "", $replacekey)));
+              $ck = trim(str_replace("{{","",str_replace("}}", "", $replacekey)));
               if (array_key_exists($ck, $contact)) {
                 $personalized=str_replace($replacekey, $contact->{$ck}, $personalized);
               }
@@ -444,7 +504,7 @@ switch ($method) {
               error_log("ERROR: Engine: was about to send message but either contactnumber: ".$contactnumber." or nextmessage: ".$nextmessage." is empty");
             } else {
               // store message (next phase)
-              $messageid = $anniedb->insertMessage($key,json_decode(json_encode(array(
+              $messageid = $anniedb->insertMessage($contactid,json_decode(json_encode(array(
                 //id is generated: "id"=>?,
                 //default: "created"=>null,
                 "createdby"=>"Engine",
@@ -476,16 +536,15 @@ switch ($method) {
                 //todo test $areyouokay
               }
             }
-
             if ($dosupportneed) {
-              $category = explode(".",$nextphase)[0];//if there is ".other" cut it out
-              if (!$category) {
-                $category = "Z";//Unknown, actual default by anniedb but use it here for clarity
+              $category = "Z";//Unknown, actual default by anniedb but use it here for clarity
+              if (array_key_exists("category", $currentphaseconfig)) {
+                $category = $currentphaseconfig->{'category'};
               }
-              $areyouokay = $anniedb->insertSupportneed($key,json_decode(json_encode(array(
+              $areyouokay = $anniedb->insertSupportneed($contactid,json_decode(json_encode(array(
                 //default: "updated"=>null,
                 "updatedby"=>"Annie", // UI shows this
-                //not needed: "contact"=>$key,
+                //not needed: "contact"=>$contactid,
                 "category"=>$category,
                 //not needed: "status"=>1,
                 "survey"=>$survey
@@ -495,50 +554,21 @@ switch ($method) {
                 error_log("WARNING: Engine: insert supportneed failed");
               }
               //...continue anyway
-
-              // end the survey for this contact (rule: whenever supportneed...)
-              $areyouokay = $anniedb->insertContactsurvey($key,json_decode(json_encode(array(
-                //default: "updated"=>null,
-                "updatedby"=>"Engine",
-                "survey"=>$survey,
-                "status"=>'100'
-              ))));
-              if (!$areyouokay) {
-                error_log("WARNING: Engine: insert contactsurvey(2) failed");
-              }
-            } else {
-              // if next nextphase doesnt exists (responding to "A" for example) end the contactsurvey
-              $nextnextphaseexists = false;
-              foreach ($currentphaseconfig as $fk => $fv) {
-                if (strpos($fk,"response") !== false) {
-                  $nextnextphaseexists = true;
-                }
-              }
-              if (!$nextnextphaseexists) {
-                $areyouokay = $anniedb->insertContactsurvey($key,json_decode(json_encode(array(
-                  //default: "updated"=>null,
-                  "updatedby"=>"Engine",
-                  "survey"=>$survey,
-                  "status"=>'100'
-                ))));
-                if (!$areyouokay) {
-                  error_log("WARNING: Engine: insert contactsurvey(3) failed");
-                }
-              }
             }
-
           }
-          // end the survey for this contact (no nextphase!)
-          if (!$nextphase) {
-            $areyouokay = $anniedb->insertContactsurvey($key,json_decode(json_encode(array(
+
+          // if we've reached leaf level end the survey
+          if (empty(getPossiblePhases($nextphase,$currentphaseconfig))) {
+            $areyouokay = $anniedb->insertContactsurvey($contactid,json_decode(json_encode(array(
               //default: "updated"=>null,
-              "updatedby"=>"Engine",
+              "updatedby"=>"Engine", //not important
               "survey"=>$survey,
-              "status"=>'100'
+              "status"=>"100"
             ))));
             if (!$areyouokay) {
-              error_log("WARNING: Engine: insert contactsurvey(4) failed");
+              error_log("WARNING: Engine: insert contactsurvey(2) failed");
             }
+            //...continue anyway
           }
         }
       }

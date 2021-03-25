@@ -1,6 +1,6 @@
 <?php
 /* index.php
- * Copyright (c) 2019 Annie Advisor
+ * Copyright (c) 2019-2021 Annie Advisor
  * All rights reserved.
  * Contributors:
  *  Lauri Jokipii <lauri.jokipii@annieadvisor.com>
@@ -47,9 +47,10 @@ $input = json_decode(file_get_contents('php://input'));
 
 // NB! No operations. Atleast not yet.
 http_response_code(200);
-echo '{';
-echo '"api_version":"'.file_get_contents("build").'",';
-echo '"db_version":"'.$dbschm.'",';
-echo '"ui_version":"'.file_get_contents("../dist/build").'"';
-echo '}';
+echo '{"version":{';
+echo '"db":"'.$dbschm.'",';
+echo '"api":"'.file_get_contents("build").'",';
+echo '"ui":"'.file_get_contents("../dist/build").'",';
+echo '"deploy":"'.file_get_contents("deploybuild").'"';
+echo '}}';
 ?>

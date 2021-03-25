@@ -1,6 +1,6 @@
 <?php
 /* delivery.php
- * Copyright (c) 2019,2020 Annie Advisor
+ * Copyright (c) 2019-2021 Annie Advisor
  * All rights reserved.
  * Contributors:
  *  Lauri Jokipii <lauri.jokipii@annieadvisor.com>
@@ -14,7 +14,7 @@ require_once '../api/settings.php';//->settings,db*
 //no auth, ip restriction
 
 require_once '../api/anniedb.php';
-$anniedb = new Annie\Advisor\DB($dbhost,$dbport,$dbname,$dbschm,$dbuser,$dbpass);
+$anniedb = new Annie\Advisor\DB($dbhost,$dbport,$dbname,$dbschm,$dbuser,$dbpass,$salt);
 
 require '../api/http_response_code.php';
 
@@ -130,19 +130,20 @@ switch ($method) {
       $annienumber = "";
       $contactnumber = "";
 
-      // figure out contact id (key) from destination/sender number
+      // figure out contactid from destination/sender number
       //echo json_encode(array($destination));
-      $contactkeys = json_decode(json_encode($anniedb->selectContactKey($destination)));
-      if (count($contactkeys)>0) {
+      $contactid = null;
+      $contactids = json_decode(json_encode($anniedb->selectContactId($destination)));
+      if (count($contactids)>0) {
         $contactnumber = $destination;
         $annienumber = $sender;
-        $key = $contactkeys[0]->{'key'};
+        $contactid = $contactids[0]->{'id'};
       } else {
-        $contactkeys = json_decode(json_encode($anniedb->selectContactKey($sender)));
-        if (count($contactkeys)>0) {
+        $contactids = json_decode(json_encode($anniedb->selectContactId($sender)));
+        if (count($contactids)>0) {
           $contactnumber = $sender;
           $annienumber = $destination;
-          $key = $contactkeys[0]->{'key'};
+          $contactid = $contactids[0]->{'id'};
         } else {
           $areyouokay = false;
           //TODO: errors
@@ -152,11 +153,11 @@ switch ($method) {
         }
       }
 
-      //error_log("DEBUG: Delivery: key: ".$key);
+      //error_log("DEBUG: Delivery: contactid: ".$contactid);
 
       // figure out survey (here batchid) from contactnumber if not known from optional parameter
       if (!$batchid) {
-        $contactsurveys = json_decode(json_encode($anniedb->selectContactLastContactsurvey($key)));
+        $contactsurveys = json_decode(json_encode($anniedb->selectLastContactsurvey($contactid)));
         $batchid = $contactsurveys[0]->{'survey'};
       }
 
@@ -164,10 +165,6 @@ switch ($method) {
       // actions
       //
 
-      $sendername = "Annie"; //default, use contact if thats the sender
-      if ($sender == $contactnumber) { //should not happen, actually
-        $sendername = $contact->{'firstname'}." ".$contact->{'lastname'};
-      }
       // update status
       //error_log("DEBUG: Delivery: update: batchid: ".$batchid);
       $areyouokay = $anniedb->updateMessage($batchid,json_decode(json_encode(array(
