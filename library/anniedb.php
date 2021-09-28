@@ -697,7 +697,10 @@ class DB {
       $input->{'sender'} = "";
     }
     if (!array_key_exists('survey', $input)) {
-      return false;
+      $input->{'survey'} = null;
+    }
+    if (!array_key_exists('context', $input)) {
+      $input->{'context'} = null;
     }
     if (!array_key_exists('status', $input)) {
       $input->{'status'} = null;
@@ -713,8 +716,8 @@ class DB {
     //-encrypt
 
     $sql = "
-      INSERT INTO $dbschm.message (id,updated,updatedby,contact,body,sender,survey,status,created,createdby,iv)
-      VALUES (:message,:updated,:updatedby,:contact,:body,:sender,:survey,:status,:created,:createdby,:iv)
+      INSERT INTO $dbschm.message (id,updated,updatedby,contact,body,sender,survey,context,status,created,createdby,iv)
+      VALUES (:message,:updated,:updatedby,:contact,:body,:sender,:survey,:context,:status,:created,:createdby,:iv)
     ";
     $sth = $this->dbh->prepare($sql);
     $sth->bindParam(':message', $input->{'id'});
@@ -724,6 +727,7 @@ class DB {
     $sth->bindParam(':body', $enc_body);
     $sth->bindParam(':sender', $enc_sender);
     $sth->bindParam(':survey', $input->{'survey'});
+    $sth->bindParam(':context', $input->{'context'});
     $sth->bindParam(':status', $input->{'status'});
     $sth->bindParam(':created', $input->{'created'});
     $sth->bindParam(':createdby', $input->{'createdby'});
@@ -963,6 +967,16 @@ class DB {
       $sql.= " AND id = ? ";
     }
 
+    // sanity check via setup
+    if (!isset($getarr)) {
+      $getarr = array();
+    }
+    if (!array_key_exists("id", $getarr)) {
+      $getarr["id"] = array();
+    }
+    if (!array_key_exists("status", $getarr)) {
+      $getarr["status"] = array();
+    }
     // make lists of "?" characters from get parameters
     $in_id = implode(',', array_fill(0, count($getarr["id"]), '?'));
     if ($in_id)      $sql.= " AND id in ($in_id)";//part of list of strings
@@ -1157,50 +1171,6 @@ class DB {
     return $ret;
   }
 
-  public function selectLastContactsurvey($contact) {
-    $dbschm = $this->dbschm;
-    if ($contact) {
-      // for listing all latest data
-      // take only one (the last one) for contact
-      $sql = "
-        SELECT cs.id
-        , cs.updated
-        , cs.updatedby
-        , cs.contact
-        , case
-          -- grace period, delay for last message, choose whatever was -active- recently
-          when greatest(cs.updated,msg.updated) > current_timestamp - make_interval(hours := cast(config.value as int)) then cs.survey
-          -- contactsurvey has ended -> Y
-          when cs.status='100' then 'Y'
-          -- entire survey has ended -> Y
-          when su.endtime < current_timestamp then 'Y'
-          else cs.survey
-          end survey
-        , case
-          -- grace period, delay for last message, choose whatever was -active- recently
-          when greatest(cs.updated,msg.updated) > current_timestamp - make_interval(hours := cast(config.value as int)) then cs.status
-          -- contactsurvey has ended -> start (Y)
-          when cs.status='100' then 'Y'
-          -- entire survey has ended -> start (Y)
-          when su.endtime < current_timestamp then 'Y'
-          else cs.status
-          end status -- or category!
-        FROM $dbschm.contactsurvey cs
-        JOIN $dbschm.message msg ON msg.contact=cs.contact --AD-152 do check messages as well
-        JOIN $dbschm.survey su on su.id=cs.survey
-        JOIN $dbschm.config ON config.segment='survey' and config.field='lastMessageDelay'
-        WHERE cs.contact = :contact
-        ORDER BY updated DESC LIMIT 1
-      ";
-      // excecute SQL statement
-      $sth = $this->dbh->prepare($sql);
-      $sth->bindParam(':contact', $contact);
-      $sth->execute();
-      return $sth->fetchAll(PDO::FETCH_ASSOC);
-    }
-    return false;
-  }
-
   public function selectSurveyConfig($survey) {
     $dbschm = $this->dbschm;
     // for listing all data
@@ -1217,6 +1187,28 @@ class DB {
     return $sth->fetchAll(PDO::FETCH_ASSOC);
   }
 
+  public function selectConfig($segment,$field) {
+    $dbschm = $this->dbschm;
+    // for listing all data
+    $sql = "SELECT id,segment,field,value FROM $dbschm.config WHERE 1=1 ";
+    if ($segment) {
+      $sql.= " AND segment = :segment ";
+    }
+    if ($field) {
+      $sql.= " AND field = :field ";
+    }
+    // excecute SQL statement
+    $sth = $this->dbh->prepare($sql);
+    if ($segment) {
+      $sth->bindParam(':segment', $segment);
+    }
+    if ($field) {
+      $sth->bindParam(':field', $field);
+    }
+    $sth->execute();
+    return $sth->fetchAll(PDO::FETCH_ASSOC);
+  }
+
   // OTHER
 
   public function selectContactMessages($contact) {
@@ -1224,32 +1216,45 @@ class DB {
     $sql = "
       SELECT m.id,m.updated,m.updatedby,m.contact,m.body,m.sender,m.survey,m.iv
       ,m.created,m.createdby
-      ,m.status
+      ,m.status,m.context
       FROM $dbschm.message m
-      WHERE (m.contact,m.survey) in (
-        select sn.contact, sn.survey
-        from $dbschm.supportneed sn
-        where(1=0
-          or (
+      WHERE 1=1
+      AND (
+        -- survey is set and user has access
+        (m.contact,m.survey) IN (
+          select sn.contact, sn.survey
+          from $dbschm.supportneed sn
+          where(1=0
+            or (
+              select j.value::boolean
+              from $dbschm.annieusersurvey aus
+              cross join jsonb_each(aus.meta->'category') j
+              where aus.meta is not null and aus.meta->'category' is not null
+              and aus.annieuser = :auth_uid
+              and aus.survey = sn.survey
+              and j.key = sn.category
+            )
+            or (
+              select (aus.meta->'coordinator')::boolean
+              from $dbschm.annieusersurvey aus
+              where aus.meta is not null and aus.meta->'coordinator' is not null
+              and aus.annieuser = :auth_uid
+              and aus.survey = sn.survey
+            )
+            -- survey independent superuser also
+            or (
+              select au.superuser
+              from $dbschm.annieuser au
+              where au.id = :auth_uid
+            )
+          )
+        ) OR (
+        -- survey is NOT set but user still has access
+          m.survey is null
+          and (
             select au.superuser
             from $dbschm.annieuser au
             where au.id = :auth_uid
-          )
-          or (
-            select j.value::boolean
-            from $dbschm.annieusersurvey aus
-            cross join jsonb_each(aus.meta->'category') j
-            where aus.meta is not null and aus.meta->'category' is not null
-            and aus.annieuser = :auth_uid
-            and aus.survey = sn.survey
-            and j.key = sn.category
-          )
-          or (
-            select (aus.meta->'coordinator')::boolean
-            from $dbschm.annieusersurvey aus
-            where aus.meta is not null and aus.meta->'coordinator' is not null
-            and aus.annieuser = :auth_uid
-            and aus.survey = sn.survey
           )
         )
       )

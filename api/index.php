@@ -47,5 +47,5 @@ $input = json_decode(file_get_contents('php://input'));
 
 // NB! No operations. Atleast not yet.
 http_response_code(200);
-echo '{"version":"'.file_get_contents("annieversion").'"}';
+echo '{"version":"'.file_get_contents("../annieversion").'"}';
 ?>

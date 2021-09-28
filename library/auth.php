@@ -28,7 +28,7 @@ if (isset($_SERVER['PHP_AUTH_USER']) && isset($_SERVER['PHP_AUTH_PW'])) {
 }
 
 if ($validated) {
-  $auth_uid = $user;
+  $auth_uid = strtolower($user);
 } else {
   //header('HTTP/1.0 401 Unauthorized');
   //die ("Not authorized");
@@ -42,7 +42,7 @@ if ($validated) {
       case 'uid':
       case 'urn:mpass.id:uid':
       case 'MPASS-10-MPASSUID':
-        $auth_uid = $v[0];
+        $auth_uid = strtolower($v[0]);
         break;
         // no default
     }

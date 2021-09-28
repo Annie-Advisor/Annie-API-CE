@@ -166,12 +166,6 @@ switch ($method) {
 
       //error_log("DEBUG: Delivery: contactid: ".$contactid);
 
-      // figure out survey (here batchid) from contactnumber if not known from optional parameter through Quriiri
-      if (!$batchid) {
-        $contactsurveys = json_decode(json_encode($anniedb->selectLastContactsurvey($contactid)));
-        $batchid = $contactsurveys[0]->{'survey'};
-      }
-
       //
       // actions
       //

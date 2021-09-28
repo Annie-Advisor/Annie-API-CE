@@ -1,0 +1,5 @@
+insert into config (updatedby,segment,field,value)
+values
+('Annie','mail','messageToSupportneedImmediate','{ "subject": { "en": "A new message from a student", "fi": "Uusi viesti opiskelijalta" }, "header": { "en": "<html><body><p>Hi!</p><p>A student sent a new message regarding their support need ({{supportneedCategory}}).</p>", "fi": "<html><body><p>Moikka!</p><p>Opiskelija lähetti juuri uuden viestin tuen tarpeeseensa liittyen ({{supportneedCategory}}).</p>" }, "footer": { "en": "<p>You can find the support needs reported by students here:<br>https://{{ hostname }}.annieadvisor.com</p><p>In case you have any questions, please reply :)</p><p>Kind regards,<br>Annie</p></body></html>", "fi": "<p>Voit tarkastella opiskelijoiden ilmoittamia tuen tarpeita täällä:<br>https://{{ hostname }}.annieadvisor.com</p><p>Jos sinulla on kysyttävää, voit vastata tähän viestiin :)</p><p>terveisin,<br>Annie</p></body></html>" } }')
+ON CONFLICT (segment,field)
+DO UPDATE SET value=EXCLUDED.value, updatedby=EXCLUDED.updatedby, updated=now();

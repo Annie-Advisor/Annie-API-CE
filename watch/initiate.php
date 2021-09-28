@@ -156,7 +156,8 @@ if ($areyouokay && $messagetemplate) {
         "updatedby"=>"Initiate",
         "body"=>$message,
         "sender"=>"Annie",
-        "survey"=>$survey
+        "survey"=>$survey,
+        "context"=>"SURVEY"
       ))));
       if ($messageid === FALSE) {
         $areyouokay = false;
@@ -189,19 +190,9 @@ if ($areyouokay && $messagetemplate) {
                 "status"=>$data["status"]
               ))));
               //todo test $areyouokay
-              // do supportneed on immediate fail
+              // on immediate fail:
               if ($data["status"] == "FAILED") {
-                $areyouokay = $anniedb->insertSupportneed($contactid,json_decode(json_encode(array(
-                  //default: "updated"=>null,
-                  "updatedby"=>"Annie", // UI shows this
-                  //not needed: "contact"=>$contactid,
-                  "category"=>"W", // message not delivered
-                  //not needed: "status"=>1,
-                  "survey"=>$survey
-                  //? "userrole"=>?
-                ))));
-                //todo test $areyouokay
-                // end the survey for this contact (rule: whenever supportneed...)
+                // end the survey for this contact
                 $areyouokay = $anniedb->insertContactsurvey($contactid,json_decode(json_encode(array(
                   //default: "updated"=>null,
                   "updatedby"=>"Initiate",

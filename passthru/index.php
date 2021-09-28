@@ -3,11 +3,10 @@
  * Copyright (c) 2019-2021 Annie Advisor
  * All rights reserved.
  * Contributors:
-*  Lauri Jokipii <lauri.jokipii@annieadvisor.com>
-  *
- * Index script for safety.
+ *  Lauri Jokipii <lauri.jokipii@annieadvisor.com>
  *
- * NB! This script is not meant to be used for anything especially meaningful. Only version info for now.
+ * Index script for safety. Only version info for now.
+ *
  * NB! Authorization done via lower level IP restriction!
  */
 
@@ -42,20 +41,20 @@ $input = json_decode(file_get_contents('php://input'));
 
 echo '{';
 echo '"hostname":"'.gethostname().'",';
-echo '"version":"'.file_get_contents("/var/www/html/annieversion").'"';
+echo '"version":"'.file_get_contents("my_html/annieversion").'"';
 if ("dev" == explode(".",gethostname())[0]) {
   echo ',';
   echo '"component":{';
   echo '"db":"'.$dbschm.'",';
-  echo '"library":"'.file_get_contents("/opt/annie/anniebuild").'",';
-  echo '"watch":"'.file_get_contents("/opt/watch/anniebuild").'",';
-  echo '"api":"'.file_get_contents("/var/www/html/api/anniebuild").'",';
-  echo '"passthru":"'.file_get_contents("/var/www/html/passthru/anniebuild").'",';
-  echo '"landbot":"'.file_get_contents("/var/www/html/landbot/anniebuild").'",';
-  echo '"ui":"'.file_get_contents("/var/www/html/dist/anniebuild").'",';
-  echo '"admin":"'.file_get_contents("/var/www/html/admin/anniebuild").'",';
-  echo '"cupload":"'.file_get_contents("/var/www/html/cupload/anniebuild").'",';
-  echo '"stats":"'.file_get_contents("/var/www/html/stats/anniebuild").'"';
+  echo '"library":"'.file_get_contents("my_annie/anniebuild").'",';
+  echo '"watch":"'.file_get_contents("my_watch/anniebuild").'",';
+  echo '"api":"'.file_get_contents("my_html/api/anniebuild").'",';
+  echo '"passthru":"'.file_get_contents("my_html/passthru/anniebuild").'",';
+  echo '"landbot":"'.file_get_contents("my_html/landbot/anniebuild").'",';
+  echo '"ui":"'.file_get_contents("my_html/dist/anniebuild").'",';
+  echo '"admin":"'.file_get_contents("my_html/admin/anniebuild").'",';
+  echo '"cupload":"'.file_get_contents("my_html/cupload/anniebuild").'",';
+  echo '"stats":"'.file_get_contents("my_html/stats/anniebuild").'"';
   echo '}';
 }
 echo '}';

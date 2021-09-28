@@ -75,6 +75,7 @@ $anniedb = new Annie\Advisor\DB($dbhost,$dbport,$dbname,$dbschm,$dbuser,$dbpass,
 try {
   $dbh = new PDO("pgsql: host=$dbhost; port=$dbport; dbname=$dbname", $dbuser, $dbpass);
 } catch (PDOException $e) {
+  http_response_code(500);
   die("Something went wrong while connecting to database: " . $e->getMessage() );
 }
 /* - db */
@@ -157,17 +158,19 @@ if (count($surveyconfigs)>0) {
     // "endtime is in future"
     if ("endtime" == $jk) {
       if ($jv < date("Y-m-d H:i")) { // we've passed end time
-        error_log("FAILED: Resend: endtime is NOT in future with survey=".$survey);
-        http_response_code(400);
         $areyouokay = false;
+        http_response_code(400);
+        error_log("FAILED: Resend: endtime is NOT in future with survey=".$survey);
+        exit;
       }
     }
     // status = IN PROGRESS
     if ("status" == $jk) {
       if ($jv != "IN PROGRESS") { // status is not in progress
-        error_log("FAILED: Resend: status is NOT IN PROGRESS with survey=".$survey);
-        http_response_code(400);
         $areyouokay = false;
+        http_response_code(400);
+        error_log("FAILED: Resend: status is NOT IN PROGRESS with survey=".$survey);
+        exit;
       }
     }
   }
@@ -226,7 +229,8 @@ if ($areyouokay && $messagetemplate) {
         "updatedby"=>"Resend",
         "body"=>$message,
         "sender"=>"Annie",
-        "survey"=>$survey
+        "survey"=>$survey,
+        "context"=>"SURVEY"
       ))));
       if ($messageid === FALSE) {
         $areyouokay = false;
@@ -256,15 +260,9 @@ if ($areyouokay && $messagetemplate) {
                 "status"=>$data["status"]
               ))));
               //todo test $areyouokay
-              // do supportneed on immediate fail
+              // on immediate fail:
               if ($data["status"] == "FAILED") {
-                $areyouokay = $anniedb->insertSupportneed($contactid,json_decode(json_encode(array(
-                  "updatedby"=>"Annie", // UI shows this
-                  "category"=>"W", // message not delivered
-                  "survey"=>$survey
-                ))));
-                //todo test $areyouokay
-                // end the survey for this contact (rule: whenever supportneed...)
+                // end the survey for this contact
                 $areyouokay = $anniedb->insertContactsurvey($contactid,json_decode(json_encode(array(
                   "updatedby"=>"Resend",
                   "survey"=>$survey,
@@ -280,5 +278,8 @@ if ($areyouokay && $messagetemplate) {
     }
   }
 }
+
+// if we get this far
+http_response_code(200);
 
 ?>

@@ -255,6 +255,54 @@ function mailOnSupportneedImmediate($surveyname,$categoryname,$annieusers,$mailc
   }
 }
 
+/* "When a new message to existing supportneed arrives notify responsible for annieuser"
+*/
+function mailOnMessageToSupportneedImmediate($surveyname,$categoryname,$annieusers,$mailcontent,$lang) {
+  global $emailprovider, $replaceablevalues;
+
+  if (!isset($surveyname) || !isset($categoryname) || !isset($annieusers) || !isset($mailcontent) || !isset($lang)) {
+    return;
+  }
+
+  $sendSmtpEmail = new SendinBlue\Client\Model\SendSmtpEmail();
+
+  // replaceables
+  $replaceablevalues->{"surveyname"} = $surveyname->$lang;
+  $replaceablevalues->{"supportneedcategory"} = $categoryname->$lang;
+
+  // subject
+  $sendSmtpEmail['subject'] = textUnTemplate($mailcontent->subject->$lang);
+
+  // body
+  // header
+  $sendSmtpEmail['htmlContent'] = textUnTemplate($mailcontent->header->$lang);
+  // footer
+  // nb! catenate
+  $sendSmtpEmail['htmlContent'] .= textUnTemplate($mailcontent->footer->$lang);
+
+  // meta
+  $sendSmtpEmail['sender'] = array('name' => 'Annie Advisor', 'email' => explode(".",gethostname())[0].'@annieadvisor.com');
+  // for each recipient (superuser or assigned to survey)
+  $mailrecipients = array();
+  foreach ($annieusers as $au) {
+    //check id format for email
+    if (filter_var($au->{'annieuser'}, FILTER_VALIDATE_EMAIL)) {
+      array_push($mailrecipients,array('email' => $au->{'annieuser'}));
+    }
+  }
+  $sendSmtpEmail['to'] = $mailrecipients;
+  $sendSmtpEmail['bcc'] = array(
+      array('email' => 'devops@annieadvisor.com')
+  );
+
+  // send
+  try {
+    $result = $emailprovider->sendTransacEmail($sendSmtpEmail);
+  } catch (Exception $e) {
+    echo 'ERROR: Exception when calling TransactionalEmailsApi->sendTransacEmail: ', $e->getMessage(), PHP_EOL;
+  }
+}
+
 
 /*
 */

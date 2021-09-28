@@ -106,7 +106,7 @@ function decrypt($string,$iv) {
 //
 
 //: "viesti ei mennyt perille"
-{
+if ("AD-246"=="DISABLED") {
   // AD-42: when there is already a supportneed for ongoing survey we want to add a comment to the supportneed only
   //TODO: lang
   $ivlen = openssl_cipher_iv_length($cipher);
@@ -199,7 +199,7 @@ function decrypt($string,$iv) {
 } // - "viesti ei mennyt perille"
 
 //: "opiskelija ei vastannut"
-{
+if ('AD-246'=='DISABLED') {
   /*
   - Jos opiskelija ei vastaa muistutusviestiin surveyn endtimeen mennessä niin luodaan supportneed "Opiskelija ei vastannut" kun kyselykierros suljetaan.
   */
