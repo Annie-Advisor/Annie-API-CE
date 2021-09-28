@@ -1,0 +1,8 @@
+flyway.url=jdbc:postgresql://$ANNIE_DBHOST:$ANNIE_DBPORT/$ANNIE_DBNAME
+flyway.user=$ANNIE_DBUSER
+flyway.password=$ANNIE_DBPASS
+flyway.schemas=$ANNIE_DBSCHM
+flyway.defaultSchema=$ANNIE_DBSCHM
+flyway.createSchemas=true
+flyway.baselineOnMigrate=true
+flyway.locations=filesystem:$ANNIE_DB_DIR/database-migration

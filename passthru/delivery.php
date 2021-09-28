@@ -10,13 +10,13 @@
  * NB! Authorization done via lower level IP restriction!
  */
 
-require_once '../api/settings.php';//->settings,db*
+require_once '/opt/annie/settings.php';//->settings,db*
 //no auth, ip restriction
 
-require_once '../api/anniedb.php';
+require_once '/opt/annie/anniedb.php';
 $anniedb = new Annie\Advisor\DB($dbhost,$dbport,$dbname,$dbschm,$dbuser,$dbpass,$salt);
 
-require '../api/http_response_code.php';
+require '/opt/annie/http_response_code.php';
 
 $headers = array();
 $headers[]='Access-Control-Allow-Headers: Content-Type';
@@ -79,6 +79,17 @@ switch ($method) {
   case 'POST':
     if ($input) {
       //error_log("DEBUG: Delivery: input: ".json_encode($input));
+      /* Quriiri example:
+      {
+        "sender":"+358450000001",
+        "destination":"+358500000002",
+        "status":"DELIVERED",
+        "statustime":"2020-10-06T09:24:15Z",
+        "smscount":"1",
+        "batchid":"6"
+      }
+      */
+
       // variables
       $sender = null; // phonenumber
       $destination = null; // phonenumber
@@ -108,7 +119,7 @@ switch ($method) {
         exit;
       }
 
-      //nb! sms numbers are somehow scuffed "+358..." -> " 358..."
+      //nb! quriiri numbers are somehow scuffed "+358..." -> " 358..."
       $destination = trim($destination);
       $sender = trim($sender);
 
@@ -155,7 +166,7 @@ switch ($method) {
 
       //error_log("DEBUG: Delivery: contactid: ".$contactid);
 
-      // figure out survey (here batchid) from contactnumber if not known from optional parameter
+      // figure out survey (here batchid) from contactnumber if not known from optional parameter through Quriiri
       if (!$batchid) {
         $contactsurveys = json_decode(json_encode($anniedb->selectLastContactsurvey($contactid)));
         $batchid = $contactsurveys[0]->{'survey'};

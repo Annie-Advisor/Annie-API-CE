@@ -9,19 +9,26 @@
  * With authentication check first.
  */
 
-require_once('settings.php');//->settings,db*,sms*
-require_once('auth.php');
+require_once('/opt/annie/settings.php');//->settings,db*,quriiri*
+require_once('/opt/annie/auth.php');
 
-require_once('anniedb.php');
+require_once('/opt/annie/anniedb.php');
 $anniedb = new Annie\Advisor\DB($dbhost,$dbport,$dbname,$dbschm,$dbuser,$dbpass,$salt);
+/* + db for specialized query */
+try {
+  $dbh = new PDO("pgsql: host=$dbhost; port=$dbport; dbname=$dbname", $dbuser, $dbpass);
+} catch (PDOException $e) {
+  die("Something went wrong while connecting to database: " . $e->getMessage() );
+}
+/* - db */
 
-$smsapiuri = $settings['sms']['apiuri'];
-$smsapikey = $settings['sms']['apikey'];
-if ( !( isset($smsapiuri) && isset($smsapikey) ) ) {
+$quriiriapiuri = $settings['quriiri']['apiuri'];
+$quriiriapikey = $settings['quriiri']['apikey'];
+if ( !( isset($quriiriapiuri) && isset($quriiriapikey) ) ) {
   die("Failed with settings");
 }
 
-require 'http_response_code.php';
+require '/opt/annie/http_response_code.php';
 
 $headers = array();
 $headers[]='Access-Control-Allow-Headers: Content-Type';
@@ -75,8 +82,8 @@ if ( !( isset($destination) && isset($message) ) ) {
   die("Couldn't resolve required data from input");
 }
 
-require_once('/opt/sms_api/sender.php');
-$sms = new SMS_API\Sender($smsapikey,$smsapiuri);
+require_once('/opt/quriiri_api/sender.php');
+$quriiri = new Quriiri_API\Sender($quriiriapikey,$quriiriapiuri);
 
 $areyouokay = true;
 
@@ -87,41 +94,45 @@ if ($messageid === FALSE) {
   $areyouokay = false;
 }
 
-// sendSMS
 if ($areyouokay) {
+  $sql = "select value from $dbschm.config where segment='sms' and field='validity'";
+  $sth = $dbh->prepare($sql);
+  $sth->execute();
+  $res = $sth->fetch(PDO::FETCH_OBJ);
+  $smsvalidity = isset($res->value) ? $res->value : 1440;//default 24h
+  // sendSMS
   // convert destination to array
-  $res = $sms->sendSms(null, array($destination), $message, array("batchid"=>$messageid));
+  $res = $quriiri->sendSms(null, array($destination), $message, array("batchid"=>$messageid, "validity"=>$smsvalidity));
+  //error_log("DEBUG: SendSMS: " . var_export($res,true));
   foreach($res["errors"] as $error) {
-    error_log("DEBUG: SendSMS: ERROR: " . $error["message"]);
+    error_log("ERROR: SendSMS: " . $error["message"]);
     $areyouokay = false;
   }
   foreach($res["warnings"] as $warning) {
-    error_log("DEBUG: SendSMS: WARNING: " . $warning["message"]);
+    error_log("WARNING: SendSMS: " . $warning["message"]);
     $areyouokay = false;
   }
-  //ok but may be FAILED cases
-}
-// update message.status via response
-if ($areyouokay) {
-  if ($res["messages"][$destination]) {
-    $data = $res["messages"][$destination];
-    if ($data["status"]) {
-      //if (array_key_exists("reason", $data))
-          //echo ", reason " . $data["reason"];
-      $areyouokay = $anniedb->updateMessage($messageid,json_decode(json_encode(array(
-        "updated"=>null,
-        "updatedby"=>"SendSMS",
-        "status"=>$data["status"]
-      ))));
+  // update message.status via response
+  if ($areyouokay) {
+    if ($res["messages"][$destination]) {
+      $data = $res["messages"][$destination];
+      if ($data["status"]) {
+        //error_log("DEBUG: SendSMS: status=" . $data["status"] . " for " . $messageid);
+        $areyouokay = $anniedb->updateMessage($messageid,json_decode(json_encode(array(
+          //"updated"=>[not null],
+          "updatedby"=>"SendSMS",
+          "status"=>$data["status"]
+        ))));
+      }
     }
   }
 }
 
 if ($areyouokay) {
-  echo json_encode(array("status" => "OK"));
   http_response_code(200); // OK
+  echo json_encode(array("status"=>"OK"));
 } else {
-  echo json_encode(array("status" => "FAILED"));
-  //http code?
+  http_response_code(400); // Bad Request
+  echo json_encode(array("status"=>"FAILED"));
 }
 ?>

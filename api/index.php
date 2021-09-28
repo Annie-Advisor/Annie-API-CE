@@ -10,14 +10,14 @@
  * NB! This script is not meant to be used for anything meaningful, yet.
  */
 
-require_once('settings.php');
-require_once('auth.php');
+require_once('/opt/annie/settings.php');
+require_once('/opt/annie/auth.php');
 
 //
 //
 //
 
-require 'http_response_code.php';
+require '/opt/annie/http_response_code.php';
 
 $headers = array();
 $headers[]='Access-Control-Allow-Headers: Content-Type';
@@ -47,10 +47,5 @@ $input = json_decode(file_get_contents('php://input'));
 
 // NB! No operations. Atleast not yet.
 http_response_code(200);
-echo '{"version":{';
-echo '"db":"'.$dbschm.'",';
-echo '"api":"'.file_get_contents("build").'",';
-echo '"ui":"'.file_get_contents("../dist/build").'",';
-echo '"deploy":"'.file_get_contents("deploybuild").'"';
-echo '}}';
+echo '{"version":"'.file_get_contents("annieversion").'"}';
 ?>

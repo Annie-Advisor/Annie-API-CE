@@ -10,10 +10,10 @@
  * NB! Authorization done via lower level IP restriction!
  */
 
-require_once '../api/settings.php';//->settings,db*
+require_once '/opt/annie/settings.php';//->settings,db*
 //no auth, ip restriction
 
-require_once '../api/anniedb.php';
+require_once '/opt/annie/anniedb.php';
 $anniedb = new Annie\Advisor\DB($dbhost,$dbport,$dbname,$dbschm,$dbuser,$dbpass,$salt);
 /* + db for specialized "unauthorized" query */
 try {
@@ -23,13 +23,15 @@ try {
 }
 /* - db */
 
-$smsapiuri = $settings['sms']['apiuri'];
-$smsapikey = $settings['sms']['apikey'];
+require_once '/opt/annie/mail.php';
 
-require_once '/opt/sms_api/sender.php';
-$sms = new SMS_API\Sender($smsapikey,$smsapiuri);
+$quriiriapiuri = $settings['quriiri']['apiuri'];
+$quriiriapikey = $settings['quriiri']['apikey'];
 
-require '../api/http_response_code.php';
+require_once '/opt/quriiri_api/sender.php';
+$quriiri = new Quriiri_API\Sender($quriiriapikey,$quriiriapiuri);
+
+require '/opt/annie/http_response_code.php';
 
 $headers = array();
 $headers[]='Access-Control-Allow-Headers: Content-Type';
@@ -80,28 +82,30 @@ if (isset($_SERVER['CONTENT_TYPE'])
 
 function getPossiblePhases($currentphase,$flow) {
   $possiblephases = array();
-  foreach ($flow as $fk => $fv) {
-    if (preg_match('/^branch.*$/i', $fk)) {
-      $phasecandidate_ = substr($fk,strlen("branch"));
-      // direct children
-      array_push($possiblephases,$phasecandidate_);
-      // next level(s)
-      foreach ($fv as $ffk => $ffv) {
-        if (preg_match('/^branch.*$/i', $ffk)) {
-          $phasecandidate__ = substr($ffk,strlen("branch"));
-          if ($currentphase == $phasecandidate_) {// parent phase
-            array_push($possiblephases,$phasecandidate__);
-          }
-        } elseif ($ffk == "other") {
-          if ($currentphase == $phasecandidate_) {// parent phase
-            array_push($possiblephases,$phasecandidate_);
+  if (isset($flow)) {
+    foreach ($flow as $fk => $fv) {
+      if (preg_match('/^branch.*$/i', $fk)) {
+        $phasecandidate_ = substr($fk,strlen("branch"));
+        // direct children
+        array_push($possiblephases,$phasecandidate_);
+        // next level(s)
+        foreach ($fv as $ffk => $ffv) {
+          if (preg_match('/^branch.*$/i', $ffk)) {
+            $phasecandidate__ = substr($ffk,strlen("branch"));
+            if ($currentphase == $phasecandidate_) {// parent phase
+              array_push($possiblephases,$phasecandidate__);
+            }
+          } elseif ($ffk == "other") {
+            if ($currentphase == $phasecandidate_) {// parent phase
+              array_push($possiblephases,$phasecandidate_);
+            }
           }
         }
-      }
-      $possiblephases = array_merge($possiblephases,getPossiblePhases($currentphase,$fv));
-    } elseif ($fk == "other") {
-      if (in_array($currentphase,array("1","2"))) { // root phases
-        array_push($possiblephases,$currentphase);
+        $possiblephases = array_merge($possiblephases,getPossiblePhases($currentphase,$fv));
+      } elseif ($fk == "other") {
+        if (in_array($currentphase,array("1","2"))) { // root phases
+          array_push($possiblephases,$currentphase);
+        }
       }
     }
   }
@@ -144,7 +148,7 @@ function getPhaseAction($currentphase,$possiblephases,$text,$flow) {
               $nextphase = $phasecandidate__;
               $currentphaseconfig = $ffv;
               //todo: next level?
-              if ($ffv->{'supportneed'}) {
+              if (array_key_exists('supportneed', $ffv) && $ffv->{'supportneed'}) {
                 $dosupportneed = true;
               }
               //break 2;//stop all
@@ -235,6 +239,28 @@ switch ($method) {
       Phase (or survey + supportneed.category) should give us sufficient
       information to decide on next action...
       */
+
+      /* Quriiri JSON data example from PUSH (from Quriiri to Annie):
+      {
+        "sender": "+358500000002",
+        "sendertype": "MSISDN",
+        "destination": "+358400000001",
+        "text": "H\u20acllo, world!",
+        "sendtime": "2015-09-14T10:31:25Z",
+        "status": "SENT",
+        "statustime": "2015-09-14T10:31:25Z"
+      }
+      */
+      //nb! batchid for survey
+
+      /* Quriiri JSON data example for POST (from Annie to Student via Quriiri):
+      {
+        "sender": "+358500000002",
+        "destination": "+358400000001",
+        "text": "H\u20acllo, world!",
+      }
+      */
+
       // input variables
       $sender = null; // phonenumber
       $sendertype = null;
@@ -269,7 +295,7 @@ switch ($method) {
         $statustime = $input->{'statustime'};
       }
 
-      //nb! sms numbers are somehow scuffed "+358..." -> " 358..."
+      //nb! quriiri numbers are somehow scuffed "+358..." -> " 358..."
       $destination = trim($destination);
       $sender = trim($sender);
 
@@ -316,21 +342,21 @@ switch ($method) {
       // actions
       // 2. "Replied"
       // PUSHed by SMS provider or polled by this engine (which call must be made by something)
-      if (array_key_exists('sendertype', $input)) { //consider this as Provider PUSHed
+      if (array_key_exists('sendertype', $input)) { //consider this as Quriiri PUSHed
 
         // direction of message (which is sender and which destination)
         // - search for destination from contacts
         // - then for sender from contacts
         $annienumber = "";
         $contactnumber = "";
-        
+
         $contactid = null;
 
         $flow = null;
         $nextphase = null;
         $nextmessage = null;
         $currentphaseconfig = null; //for checking next nextphase
-        
+
         $possiblephases = array();
         $dosupportneed = false;
 
@@ -387,18 +413,6 @@ switch ($method) {
 
             $survey = $contactsurveys[0]->{'survey'};
             $surveyconfigs = json_decode(json_encode($anniedb->selectSurveyConfig($survey)));
-
-            // loop surveyconfig, validity (times, status)
-            $surveystarttime = null;
-            $surveyendtime = null;
-            foreach ($surveyconfigs[0] as $jk => $jv) {//nb! should be only one!
-              if ("starttime" == $jk) {//not null
-                $surveystarttime = date_create($jv); //to_string: date_format($surveystarttime,"Y-m-d H:i:s.v");
-              }
-              if ("endtime" == $jk) {//not null
-                $surveyendtime = date_create($jv);
-              }
-            }//-loop surveyconfig
 
             // special case of "Y": for this contact this survey is over (ended) but new messages still incoming
             if ($currentphase == "Y") { // status/category
@@ -466,6 +480,7 @@ switch ($method) {
             "survey"=>$survey,
             "status"=>"RECEIVED" // special case when message comes from contact
           ))));
+          //error_log("DEBUG: Engine: insert message(1): [not needed] id: ".$notneededmessageid);
           if ($notneededmessageid === FALSE) {
             $areyouokay = false;
           }
@@ -489,21 +504,24 @@ switch ($method) {
 
             // make message personalized
             // replace string placeholders, like "{{ firstname }}"
-            $replaceables=preg_split('/[^{]*(\{\{[^}]+\}\})[^{]*/', $nextmessage, -1, PREG_SPLIT_NO_EMPTY|PREG_SPLIT_DELIM_CAPTURE);
-            $personalized=$nextmessage;
-            foreach ($replaceables as $replacekey) {
-              $ck = trim(str_replace("{{","",str_replace("}}", "", $replacekey)));
-              if (array_key_exists($ck, $contact)) {
-                $personalized=str_replace($replacekey, $contact->{$ck}, $personalized);
+            $replaceables = preg_split('/[^{]*(\{\{[^}]+\}\})[^{]*/', $nextmessage, -1, PREG_SPLIT_NO_EMPTY|PREG_SPLIT_DELIM_CAPTURE);
+            $personalized = $nextmessage;
+            if (gettype($replaceables) === "array" && $replaceables[0] !== $nextmessage) {
+              foreach ($replaceables as $replaceable) {
+                $replacekey = trim(strtolower(preg_replace('/\{\{\s*([^}]+)\s*\}\}/', '$1', $replaceable)));
+                if (array_key_exists($replacekey, $contact)) {
+                  $personalized = str_replace($replaceable, $contact->{$replacekey}, $personalized);
+                }
               }
             }
-            $nextmessage=$personalized;
+            $nextmessage = $personalized;
 
             // final (possibly redundant) check:
             if (!$contactnumber || !$nextmessage) {
               error_log("ERROR: Engine: was about to send message but either contactnumber: ".$contactnumber." or nextmessage: ".$nextmessage." is empty");
             } else {
               // store message (next phase)
+              //error_log("DEBUG: Engine: insert message(2): id: ".$messageid);
               $messageid = $anniedb->insertMessage($contactid,json_decode(json_encode(array(
                 //id is generated: "id"=>?,
                 //default: "created"=>null,
@@ -521,18 +539,36 @@ switch ($method) {
               if (!$areyouokay) {
                 error_log("ERROR: Engine: insert message(2) failed");
               } else {
+                $sql = "select value from $dbschm.config where segment='sms' and field='validity'";
+                $sth = $dbh->prepare($sql);
+                $sth->execute();
+                $res = $sth->fetch(PDO::FETCH_OBJ);
+                $smsvalidity = isset($res->value) ? $res->value : 1440;//default 24h
                 // sendSMS
-                $destinations = array($contactnumber);
-                $res = $sms->sendSms(null, $destinations, $nextmessage, array("batchid"=>$messageid));
+                // convert destination/contactnumber to array
+                $res = $quriiri->sendSms(null, array($contactnumber), $nextmessage, array("batchid"=>$messageid, "validity"=>$smsvalidity));
                 foreach($res["errors"] as $error) {
-                  error_log("ERROR: Engine: " . $error["message"]);
+                  error_log("ERROR: Engine: SendSMS: " . $error["message"]);
                   $areyouokay = false;
                 }
                 foreach($res["warnings"] as $warning) {
-                  error_log("WARNING: Engine: " . $warning["message"]);
+                  error_log("WARNING: Engine: SendSMS: " . $warning["message"]);
                   $areyouokay = false;
                 }
-                //ok: foreach($destinations as $des)
+                // update message.status via response
+                if ($areyouokay) {
+                  if ($res["messages"][$contactnumber]) {
+                    $data = $res["messages"][$contactnumber];
+                    if ($data["status"]) {
+                      //error_log("DEBUG: Engine: SendSMS: status=" . $data["status"] . " for " . $messageid);
+                      $areyouokay = $anniedb->updateMessage($messageid,json_decode(json_encode(array(
+                        //"updated"=>[not null],
+                        "updatedby"=>"Engine",
+                        "status"=>$data["status"]
+                      ))));
+                    }
+                  }
+                }
                 //todo test $areyouokay
               }
             }
@@ -550,10 +586,68 @@ switch ($method) {
                 "survey"=>$survey
                 //? "userrole"=>?
               ))));
+              // areyouokay has inserted id or is false
               if (!$areyouokay) {
                 error_log("WARNING: Engine: insert supportneed failed");
+                //...continue anyway
+              } else {
+                $supportneed = $areyouokay;
+                // mail immediately to "annieuser is responsible for"
+                // we do know survey and category so
+                // query annieusers "responsible for"
+                // nb! not for superusers
+                $sql = "
+                select id as annieuser
+                from $dbschm.annieuser
+                where id in (
+                  select annieuser
+                  from $dbschm.annieusersurvey
+                  where survey = :survey
+                  and (meta->'category'->:category)::boolean
+                )
+                and notifications = 'IMMEDIATE'
+                ";
+                $sth = $dbh->prepare($sql);
+                $sth->bindParam(':survey', $survey);
+                $sth->bindParam(':category', $category);
+                $sth->execute();
+                $annieusers = json_decode(json_encode($sth->fetchAll(PDO::FETCH_ASSOC)));
+
+                $sql = "select value from $dbschm.config where segment='mail' and field='supportneedImmediate'";
+                $sth = $dbh->prepare($sql);
+                $sth->execute();
+                $res = $sth->fetch(PDO::FETCH_OBJ);
+                $mailcontent = isset($res->value) ? json_decode($res->value) : null;
+
+                $sql = "select value from $dbschm.config where segment='ui' and field='language'";
+                $sth = $dbh->prepare($sql);
+                $sth->execute();
+                $res = $sth->fetch(PDO::FETCH_OBJ);
+                $lang = isset($res->value) ? json_decode($res->value) : null;
+
+                $surveyname = null;
+                $categoryname = null;
+                $surveys = json_decode(json_encode($anniedb->selectSurvey($survey,array())));
+                if (isset($surveys) && is_array($surveys) && !empty($surveys)) {
+                  if (isset($surveys[0])) {
+                    if (array_key_exists('config',$surveys[0])) {
+                      if (array_key_exists('name',$surveys[0]->{'config'})) {
+                        $surveyname = $surveys[0]->{'config'}->{'name'};
+                      }
+                    }
+                  }
+                }
+                $categorynames = json_decode(json_encode($anniedb->selectCodes('category',$category)));
+                if (is_array($categorynames) && count($categorynames)>0) {
+                  $categoryname = $categorynames[0];
+                } else {
+                  $categoryname = (object)array($lang => $category); // default to code?
+                }
+
+                if (isset($surveyname) && isset($categoryname) && isset($annieusers) && isset($mailcontent) && isset($lang)) {
+                  mailOnSupportneedImmediate($surveyname,$categoryname,$annieusers,$mailcontent,$lang);
+                }
               }
-              //...continue anyway
             }
           }
 

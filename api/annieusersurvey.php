@@ -9,13 +9,13 @@
  * Before database there is authentication check.
  */
 
-require_once('settings.php');//->settings,db*
-require_once('auth.php');
+require_once('/opt/annie/settings.php');//->settings,db*
+require_once('/opt/annie/auth.php');
 
-require_once('anniedb.php');
+require_once('/opt/annie/anniedb.php');
 $anniedb = new Annie\Advisor\DB($dbhost,$dbport,$dbname,$dbschm,$dbuser,$dbpass,$salt);
 
-require 'http_response_code.php';
+require '/opt/annie/http_response_code.php';
 
 $headers = array();
 $headers[]='Access-Control-Allow-Headers: Content-Type';
@@ -48,13 +48,41 @@ if (count($request)>=1) {
   $key = array_shift($request);
 }
 
+// get parameters as an array (names here arent mandatory)
+$getarr = array("survey"=>[],"id"=>[]);
+// split on outer delimiter
+$pairs = explode('&', $_SERVER['QUERY_STRING']);
+// loop through each pair
+foreach ($pairs as $i) {
+  if ($i) {
+    // split into name and value
+    list($name,$value) = explode('=', $i, 2);
+    // fix value (htmlspecialchars for extra security)
+    $value = urldecode(htmlspecialchars($value));
+    // if name already exists
+    if (isset($getarr[$name])) {
+      // stick multiple values into an array
+      if (is_array($getarr[$name])) {
+        $getarr[$name][] = $value;
+      } else {
+        $getarr[$name] = array($getarr[$name], $value);
+      }
+    } else { // otherwise, simply stick it in
+      $getarr[$name] = array($value);
+    }
+  }
+}
+
 // create SQL based on HTTP method
 switch ($method) {
   case 'GET':
-    $ret = $anniedb->selectAnnieusersurvey($key);
+    $ret = $anniedb->selectAnnieusersurvey($key,$getarr);
     if ($ret !== false) {
       http_response_code(200);
       echo json_encode($ret);
+    } else {
+      http_response_code(400);
+      echo json_encode(array("status"=>"FAILED"));
     }
     break;
   case 'PUT':
@@ -64,6 +92,7 @@ switch ($method) {
         http_response_code(200);
         echo json_encode(array("status"=>"OK"));
       } else {
+        http_response_code(400);
         echo json_encode(array("status"=>"FAILED"));
       }
     }
@@ -73,8 +102,9 @@ switch ($method) {
       $ret = $anniedb->insertAnnieusersurvey($input);
       if ($ret !== false) {
         http_response_code(200);
-        echo json_encode(array("status"=>"OK", "id"=>$ret));
+        echo json_encode(array("status"=>"OK"));
       } else {
+        http_response_code(400);
         echo json_encode(array("status"=>"FAILED"));
       }
     }
@@ -86,6 +116,7 @@ switch ($method) {
         http_response_code(200);
         echo json_encode(array("status"=>"OK"));
       } else {
+        http_response_code(400);
         echo json_encode(array("status"=>"FAILED"));
       }
     }

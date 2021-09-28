@@ -9,13 +9,13 @@
  * Before database there is authentication check.
  */
 
-require_once('settings.php');//->settings,db*
-require_once('auth.php');
+require_once('/opt/annie/settings.php');//->settings,db*
+require_once('/opt/annie/auth.php');
 
-require_once('anniedb.php');
+require_once('/opt/annie/anniedb.php');
 $anniedb = new Annie\Advisor\DB($dbhost,$dbport,$dbname,$dbschm,$dbuser,$dbpass,$salt);
 
-require 'http_response_code.php';
+require '/opt/annie/http_response_code.php';
 
 $headers = array();
 $headers[]='Access-Control-Allow-Headers: Content-Type';
@@ -59,13 +59,38 @@ switch ($method) {
     if ($ret !== false) {
       http_response_code(200);
       echo json_encode($ret);
+    } else {
+      http_response_code(400);
+      echo json_encode(array("status"=>"FAILED"));
     }
     break;
   case 'PUT':
   case 'POST':
+    if ($input) {
+      $ret = $anniedb->insertCodes($input);
+      if ($ret !== false) {
+        http_response_code(200);
+        echo json_encode(array("status"=>"OK"));
+      } else {
+        http_response_code(400);
+        echo json_encode(array("status"=>"FAILED"));
+      }
+    } else {
+      http_response_code(400);
+      echo json_encode(array("status"=>"FAILED", "message"=>"input missing"));
+    }
+    break;
   case 'DELETE':
-    http_response_code(405); // Method Not Allowed
-    exit;
+    if ($set && $key) {
+      $ret = $anniedb->deleteCodes($set,$key);
+      if ($ret !== false) {
+        http_response_code(200);
+        echo json_encode(array("status"=>"OK"));
+      } else {
+        http_response_code(400);
+        echo json_encode(array("status"=>"FAILED"));
+      }
+    }
     break;
 }
 

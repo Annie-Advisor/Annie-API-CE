@@ -11,13 +11,13 @@
  * NB! This supportneed API also gets survey and contact data. For efficiency.
  */
 
-require_once('settings.php');//->settings,db*
-require_once('auth.php');
+require_once('/opt/annie/settings.php');//->settings,db*
+require_once('/opt/annie/auth.php');
 
-require_once('anniedb.php');
+require_once('/opt/annie/anniedb.php');
 $anniedb = new Annie\Advisor\DB($dbhost,$dbport,$dbname,$dbschm,$dbuser,$dbpass,$salt);
 
-require 'http_response_code.php';
+require '/opt/annie/http_response_code.php';
 
 $headers = array();
 $headers[]='Access-Control-Allow-Headers: Content-Type';
@@ -109,6 +109,9 @@ switch ($method) {
     if ($ret !== false) {
       http_response_code(200);
       echo json_encode($ret);
+    } else {
+      http_response_code(400);
+      echo json_encode(array("status"=>"FAILED"));
     }
     break;
   case 'PUT':
@@ -126,10 +129,12 @@ switch ($method) {
         http_response_code(200);
         echo json_encode(array("status"=>"OK", "id"=>$ret));
       } else {
+        http_response_code(400);
         echo json_encode(array("status"=>"FAILED"));
       }
     } else {
       http_response_code(400); // bad request
+      echo json_encode(array("status"=>"FAILED"));
       exit;
     }
     break;
@@ -140,6 +145,7 @@ switch ($method) {
         http_response_code(200);
         echo json_encode(array("status"=>"OK"));
       } else {
+        http_response_code(400);
         echo json_encode(array("status"=>"FAILED"));
       }
     }
