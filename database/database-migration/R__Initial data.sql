@@ -64,10 +64,5 @@ ON CONFLICT DO NOTHING;
 -- ANNIEUSER
 insert into annieuser (id,updatedby,createdby,superuser)
 values
-('devops@annieadvisor.com','Annie','Annie',false),
-('lauri.jokipii@annieadvisor.com','Annie','Annie',true),
-('joonas.pesonen@annieadvisor.com','Annie','Annie',true),
-('miska.noponen@annieadvisor.com','Annie','Annie',true),
-('emilia.kuuskoski@annieadvisor.com','Annie','Annie',true),
-('topi.sarkiniemi@annieadvisor.com','Annie','Annie',true)
+('devops@annieadvisor.com','Annie','Annie',false)
 ON CONFLICT DO NOTHING;
