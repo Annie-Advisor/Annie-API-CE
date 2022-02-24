@@ -109,6 +109,7 @@ $survey = $contactsurveys[0]->{'survey'};
 $nextphase = null;
 $nextphaseisleaf = null; //"next" is for grouping variable names in gatekeeper
 $nextmessage = null;
+$firstmessage = null;
 $currentphaseconfig = null; //for checking next nextphase
 
 $possiblephases = array();
@@ -120,6 +121,7 @@ $dosupportneed = false;
 //error_log("DEBUG: Engine: ...... .... possiblephases=[".implode(",",$possiblephases)."]");
 //error_log("DEBUG: Engine: ...... .... currentphaseconfig=".json_encode($currentphaseconfig));
 //error_log("DEBUG: Engine: ...... .... nextmessage=$nextmessage");
+//error_log("DEBUG: Engine: ...... .... firstmessage=$firstmessage");
 if (isset($contactnumber) && isset($contactid) && isset($survey)
  && (isset($nextphase) || isset($nextphaseisleaf))
 ) {
@@ -138,9 +140,10 @@ if (isset($contactnumber) && isset($contactid) && isset($survey)
     }
     //...continue anyway
 
-    // make message personalized
+    // make message(s) personalized
     // replace string placeholders, like "{{ firstname }}"
     $categorynamelocalized = $anniedb->originalSurveySupportneedCategoryNameLocalized($contactid,$survey);
+    // nextmessage
     $replaceables = preg_split('/[^{]*(\{\{[^}]+\}\})[^{]*/', $nextmessage, -1, PREG_SPLIT_NO_EMPTY|PREG_SPLIT_DELIM_CAPTURE);
     $personalized = $nextmessage;
     if (gettype($replaceables) === "array" && $replaceables[0] !== $nextmessage) {
@@ -155,6 +158,21 @@ if (isset($contactnumber) && isset($contactid) && isset($survey)
       }
     }
     $nextmessage = $personalized;
+    // firstmessage
+    $replaceables = preg_split('/[^{]*(\{\{[^}]+\}\})[^{]*/', $firstmessage, -1, PREG_SPLIT_NO_EMPTY|PREG_SPLIT_DELIM_CAPTURE);
+    $personalized = $firstmessage;
+    if (gettype($replaceables) === "array" && $replaceables[0] !== $firstmessage) {
+      foreach ($replaceables as $replaceable) {
+        $replacekey = trim(strtolower(preg_replace('/\{\{\s*([^}]+)\s*\}\}/', '$1', $replaceable)));
+        if (array_key_exists($replacekey, $contact)) {
+          $personalized = str_replace($replaceable, $contact->{$replacekey}, $personalized);
+        }
+        if ($replaceable == "originalsurvey.supportneed.category.name") {
+          $personalized = str_replace($replaceable, $categorynamelocalized, $personalized);
+        }
+      }
+    }
+    $firstmessage = $personalized;
 
     // final (possibly redundant) check:
     if (!$contactnumber || !$nextmessage) {
@@ -327,11 +345,11 @@ if (isset($contactnumber) && isset($contactid) && isset($survey)
         }
 
         if (isset($firstname) && isset($lastname) && isset($surveyname) && isset($categoryname)
-         && isset($annieusers) && isset($mailcontent) && isset($lang)
+         && isset($annieusers) && !empty($annieusers) && isset($mailcontent) && isset($lang)
         ) {
           //AD-285 "Change notifications so that only the “final” support need causes notifications"
           if ($nextphaseisleaf) {
-            mailOnSupportneedImmediate($firstname,$lastname,$surveyname,$categoryname,$annieusers,$mailcontent,$lang);
+            mailOnSupportneedImmediate($firstname,$lastname,$surveyname,$categoryname,$supportneed,$firstmessage,$nextmessage,$annieusers,$mailcontent,$lang);
           }
         }
       }

@@ -83,6 +83,31 @@ HTTP PUT /api/annieuser.php/annieuser@annieadvisor.com
 HTTP DELETE /api/annieuser.php/annieuser@annieadvisor.com
 ```
 
+#### unsubscribe.php (v2)
+
+Update authenticated users `annieuser.notifications` value. Defaults to DISABLED.
+
+Methods:
+
+- POST [key] input
+
+Input:
+
+```JSON
+{
+  "notifications":"string"
+}
+```
+
+Examples:
+
+```JSON
+HTTP POST /api/v2/unsubscribe.php/
+{
+  "notifications": "DISABLED"
+}
+```
+
 #### annieusersurvey.php
 
 This API endpoint has a new way of handling data, batches. So data can be given in a list of updateable or insertable rows (in POST call only).
@@ -228,6 +253,22 @@ HTTP PUT /api/codes.php/
 
 ```JSON
 HTTP DELETE /api/codes.php/anniecode/1
+```
+
+#### config.php (v2)
+
+NB! Has its own way of getting parameters via `segment` + `field` very similar to `codes.php`.
+
+Methods:
+
+- GET segment field (.../config.php/segment/field)
+
+Examples:
+
+```JSON
+HTTP GET /api/v2/config.php/
+HTTP GET /api/v2/config.php/ui/
+HTTP GET /api/v2/config.php/ui/language
 ```
 
 #### supportneedcomment.php
@@ -393,12 +434,16 @@ HTTP DELETE /api/message.php/anniemessage
 
 The structure of database table supportneed with its separate supportneedhistory table is one of a kind. This shows in the API code as well. Basically current solution in database and API is to rely on a _business key_ with combination of _contact_ and _survey_ values. The _business key_ is used in a primary key manner (but not actually) for "current status" table `supportneed`. No update of rows at all due to the nature of _supportneed_ table with separate _supportneedhistory_ table.
 
+NB! Subject to change from version 2 onward where supportneed table is meant to be dropped and supportneedhistory table (with all of the changes per support need) will be the only table!
+
+Version 2 addition to GET is to have latest information indicated with _current_=true via max id with business key contact+survey. Also DELETE method is removed
+
 Methods:
 
 - POST input
 - GET [key]
   - NB! There is also a "specialized" API supportneedspage.php
-- DELETE key
+- DEPRECATED (removed in v2): DELETE key
 
 Input:
 
@@ -417,7 +462,7 @@ Input:
 Examples:
 
 ```JSON
-HTTP POST /api/supportneed.php/
+HTTP POST /api/v2/supportneed.php/
 {
   "contact": "anniecontact",
   "survey": "anniesurvey",
@@ -427,11 +472,7 @@ HTTP POST /api/supportneed.php/
 ```
 
 ```JSON
-HTTP GET /api/supportneed.php/
-```
-
-```JSON
-HTTP DELETE /api/supportneed.php/123
+HTTP GET /api/v2/supportneed.php/
 ```
 
 #### survey.php
@@ -684,6 +725,23 @@ HTTP POST /api/sendsms.php/
   "body": "Hello world",
   "survey": "anniesurvey"
 }
+```
+
+#### annieusersupportneeds.php (v2)
+
+Return all supportneeds for active user with survey data aside. Excluding supportneeds that reference archived survey.
+
+- GET [key] [getarr]
+  - _key_ is for _contact.id_
+  - _getarr_
+    - can have zero-to-many _category_, _status_, _survey_ or _userrole_ values
+    - may have _impersonate_ with a value of _annieuser.id_
+
+Examples:
+
+```JSON
+HTTP GET /api/annieusersupportneeds.php/anniecontact
+HTTP GET /api/annieusersupportneeds.php/?category=Z&status=1&status=2&status=100
 ```
 
 #### supportneedspage.php

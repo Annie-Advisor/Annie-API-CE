@@ -1,6 +1,6 @@
 <?php
 /* anniedb.php
- * Copyright (c) 2021 Annie Advisor
+ * Copyright (c) 2021-2022 Annie Advisor
  * All rights reserved.
  * Contributors:
  *  Lauri Jokipii <lauri.jokipii@annieadvisor.com>
@@ -213,6 +213,29 @@ class DB {
     $sth->bindParam(':validuntil', $input->{'validuntil'});
     $sth->bindParam(':updated', $input->{'updated'});
     $sth->bindParam(':updatedby', $input->{'updatedby'});
+    $sth->bindParam(':id', $id);
+    if (!$sth->execute()) {
+      error_log("ERROR: DB: ".json_encode($sth->errorInfo()));
+      return false;
+    }
+    if ($sth->rowCount() < 1) return false;
+    return true;
+  }
+
+  // notifications update only
+  public function updateAnnieuserNotifications($id,$notifications) {
+    $dbschm = $this->dbschm;
+    $updated = "now()";
+    $updatedby = $this->auth_uid;
+    $sql = "
+      UPDATE $dbschm.annieuser
+      SET notifications=:notifications, updated=:updated, updatedby=:updatedby
+      WHERE id=:id
+    ";
+    $sth = $this->dbh->prepare($sql);
+    $sth->bindParam(':notifications', $notifications);
+    $sth->bindParam(':updated', $updated);
+    $sth->bindParam(':updatedby', $updatedby);
     $sth->bindParam(':id', $id);
     if (!$sth->execute()) {
       error_log("ERROR: DB: ".json_encode($sth->errorInfo()));
@@ -636,6 +659,29 @@ class DB {
     return false;
   }
 
+  public function selectConfig($segment,$field) {
+    $dbschm = $this->dbschm;
+    // for listing all data
+    $sql = "SELECT id,segment,field,value FROM $dbschm.config WHERE 1=1 ";
+    if ($segment) {
+      $sql.= " AND segment = :segment ";
+    }
+    if ($field) {
+      $sql.= " AND field = :field ";
+    }
+    // excecute SQL statement
+    $sth = $this->dbh->prepare($sql);
+    if ($segment) {
+      $sth->bindParam(':segment', $segment);
+    }
+    if ($field) {
+      $sth->bindParam(':field', $field);
+    }
+    $sth->execute();
+    return $sth->fetchAll(PDO::FETCH_ASSOC);
+  }
+  // todo: insert, update, delete
+
   public function selectContact($contact) {
     $dbschm = $this->dbschm;
     $sql = "SELECT id,contact,iv FROM $dbschm.contact ";
@@ -891,9 +937,7 @@ class DB {
     return true;
   }
 
-  //nb! supportneedhistory is not here for selecting, updating (what its for) or deleting
-
-  //nb! see also selectSupportneedsPage
+  //nb! see also selectAnnieuserSupportneeds, and older selectSupportneedsPage and selectSupportneedHistory
   public function selectSupportneed($supportneed) {
     $dbschm = $this->dbschm;
     $sql = "
@@ -903,6 +947,44 @@ class DB {
     ";
     if ($supportneed) {
       $sql.= "AND id = :supportneed ";
+    }
+    // excecute SQL statement
+    $sth = $this->dbh->prepare($sql);
+    if ($supportneed) {
+      $sth->bindParam(':supportneed', $supportneed);
+    }
+    $sth->execute();
+    return $sth->fetchAll(PDO::FETCH_ASSOC);
+  }
+
+  // nb! we are moving toward one table solution with supportneed, here is the first step
+  //     select entire history with given id marking latest (max id) as current=true
+  public function selectSupportneedHistory($supportneed) {
+    $dbschm = $this->dbschm;
+    $sql = "
+      SELECT id,updated,updatedby,contact,category,status,survey,userrole
+      , case
+        when id = (
+          select max(sn.id)
+          from $dbschm.supportneedhistory sn
+          where sn.contact = supportneedhistory.contact
+          and sn.survey = supportneedhistory.survey
+        )
+        then true
+        else false
+        end as current
+      FROM $dbschm.supportneedhistory
+      WHERE 1=1
+    ";
+    if ($supportneed) {
+      // match any point in history with business key "contact+survey"
+      $sql.= "
+      AND (contact,survey) IN (
+        select sn.contact, sn.survey
+        from $dbschm.supportneedhistory sn
+        where sn.id = :supportneed
+      )
+      ";
     }
     // excecute SQL statement
     $sth = $this->dbh->prepare($sql);
@@ -981,6 +1063,7 @@ class DB {
 
   //nb! no update for supportneed, for which we have supportneedhistory table
 
+  //TODO: rethink deletion of supportneed in version 2!
   public function deleteSupportneed($supportneed) {
     $dbschm = $this->dbschm;
     if ($supportneed) {
@@ -1336,28 +1419,6 @@ class DB {
     return $sth->fetchAll(PDO::FETCH_ASSOC);
   }
 
-  public function selectConfig($segment,$field) {
-    $dbschm = $this->dbschm;
-    // for listing all data
-    $sql = "SELECT id,segment,field,value FROM $dbschm.config WHERE 1=1 ";
-    if ($segment) {
-      $sql.= " AND segment = :segment ";
-    }
-    if ($field) {
-      $sql.= " AND field = :field ";
-    }
-    // excecute SQL statement
-    $sth = $this->dbh->prepare($sql);
-    if ($segment) {
-      $sth->bindParam(':segment', $segment);
-    }
-    if ($field) {
-      $sth->bindParam(':field', $field);
-    }
-    $sth->execute();
-    return $sth->fetchAll(PDO::FETCH_ASSOC);
-  }
-
   public function updateFollowupContacts($survey,$updatedby) {
     $dbschm = $this->dbschm;
     $ret = -1; // default error, arguments not ok
@@ -1461,8 +1522,15 @@ class DB {
         -- survey is set and user has access
         (m.contact,m.survey) IN (
           select sn.contact, sn.survey
-          from $dbschm.supportneed sn
-          where(1=0
+          from $dbschm.supportneedhistory sn
+          where 1=1
+          and sn.id = (
+            select max(supportneedhistory.id)
+            from $dbschm.supportneedhistory
+            where supportneedhistory.contact = sn.contact
+            and supportneedhistory.survey = sn.survey
+          )
+          and(1=0
             or (:auth_uid) in (select annieuser from $dbschm.usageright_superuser)
             or (:auth_uid,sn.survey) in (select annieuser,survey from $dbschm.usageright_coordinator)
             or (:auth_uid,sn.survey,sn.category) in (select annieuser,survey,category from $dbschm.usageright_provider)
@@ -1531,6 +1599,92 @@ class DB {
     $sth = $this->dbh->prepare($sql);
     // excecute SQL statement
     $sth->execute();
+    return $sth->fetchAll(PDO::FETCH_ASSOC);
+  }
+
+  public function selectAnnieuserSupportneeds($contact,$getarr) {
+    $dbschm = $this->dbschm;
+
+    $in_category = implode(',', array_fill(0, count($getarr["category"]), '?'));
+    $in_status   = implode(',', array_fill(0, count($getarr["status"]), '?'));
+    $in_survey   = implode(',', array_fill(0, count($getarr["survey"]), '?'));
+    $in_userrole = implode(',', array_fill(0, count($getarr["userrole"]), '?'));
+    //error_log("inQueries: (".$in_category.") / (".$in_status.") / (".$in_survey.") / (".$in_userrole.")");
+    //error_log("inArrays length: ".count(array_merge($getarr["category"],$getarr["status"],$getarr["survey"],$getarr["userrole"])));
+
+    // impersonate
+    $impersonate = null;
+    if (array_key_exists("impersonate", $getarr)) {
+      // value is coming in an array of arrays but only one (1st) is tried
+      if ($getarr["impersonate"][0]) {
+        // check that auth_uid has permission to do impersonation
+        $sth = $this->dbh->prepare("select 1 is_superuser from $dbschm.annieuser where id=:auth_uid and superuser");
+        $sth->bindParam(':auth_uid',$this->auth_uid);
+        if (!$sth->execute()) {
+          error_log("ERROR: DB: ".json_encode($sth->errorInfo()));
+          return false;
+        }
+        if ($sth->rowCount() > 0) {
+          $impersonate = $getarr["impersonate"][0];
+          error_log("INFO: lib/anniedb/selectAnnieuserSupportneeds: auth_uid=$this->auth_uid impersonated as ".$getarr["impersonate"][0]);
+        } else {
+          error_log("INFO: lib/anniedb/selectAnnieuserSupportneeds: auth_uid=$this->auth_uid TRIED TO IMPERSONATE AS ".$getarr["impersonate"][0]." BUT HAS NO RIGHT");
+        }
+      }
+    }
+    //error_log("DEBUG: anniedb: auth_uid=$this->auth_uid selectAnnieuserSupportneeds: impersonate=".($impersonate?$impersonate:"no; using auth_uid"));
+
+    // for listing all latest data, excluding archived survey data
+    $sql = "
+      SELECT sn.id
+      , sn.updated, sn.updatedby
+      , sn.contact, sn.category, sn.status, sn.survey
+      , sn.userrole
+      , su.starttime, su.endtime
+      FROM $dbschm.supportneedhistory sn
+      JOIN $dbschm.survey su ON su.id = sn.survey
+      WHERE 1=1
+      AND sn.id = (
+        select max(supportneedhistory.id)
+        from $dbschm.supportneedhistory
+        where supportneedhistory.contact = sn.contact
+        and supportneedhistory.survey = sn.survey
+      )
+      AND coalesce(su.status,'') NOT IN ('ARCHIVED','DELETED')
+      AND(1=0
+        or (?) in (select annieuser from $dbschm.usageright_superuser)
+        or (?,sn.survey) in (select annieuser,survey from $dbschm.usageright_coordinator)
+        or (?,sn.survey,sn.category) in (select annieuser,survey,category from $dbschm.usageright_provider)
+        or (
+            (?,sn.contact) in (select annieuser,teacherfor from $dbschm.usageright_teacher)
+            and (sn.survey,sn.category) NOT in (select survey,category from $dbschm.usageright_provider)
+        )
+      )
+    ";
+    if ($contact)      $sql.= " AND sn.contact = ?";
+    if ($in_category)  $sql.= " AND sn.category in ($in_category)";//part of list of strings
+    if ($in_status)    $sql.= " AND sn.status in ($in_status)";//part of list of strings
+    if ($in_survey)    $sql.= " AND sn.survey in ($in_survey)";//part of list of strings
+    if ($in_userrole)  $sql.= " AND sn.userrole in ($in_userrole)";//part of list of strings
+
+    // excecute SQL statement
+    $sth = $this->dbh->prepare($sql);
+    // bind parameters/values for both queries (length of array matters)
+    $sqlparams = [];
+    // impersonate: switch UID if...
+    if ($impersonate) {
+      $sqlparams = array_merge($sqlparams,[$impersonate,$impersonate,$impersonate,$impersonate]);
+    } else {
+      $sqlparams = array_merge($sqlparams,[$this->auth_uid,$this->auth_uid,$this->auth_uid,$this->auth_uid]);
+    }
+    if ($contact) {
+      $sqlparams = array_merge($sqlparams,[$contact]);
+    }
+    $sth->execute(array_merge(
+      $sqlparams,
+      $getarr["category"],$getarr["status"],$getarr["survey"],
+      $getarr["userrole"]
+    ));
     return $sth->fetchAll(PDO::FETCH_ASSOC);
   }
 

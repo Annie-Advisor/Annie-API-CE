@@ -1,6 +1,6 @@
 <?php
 /* mail.php
- * Copyright (c) 2021 Annie Advisor
+ * Copyright (c) 2021-2022 Annie Advisor
  * All rights reserved.
  * Contributors:
  *  Lauri Jokipii <lauri.jokipii@annieadvisor.com>
@@ -12,18 +12,80 @@
  * - $settings
  */
 
-$emailapikey = $settings['sendinblue']['apikey'];
-require_once 'my_app_specific_sendinblue_dir/autoload.php';
-$emailconfig = SendinBlue\Client\Configuration::getDefaultConfiguration()->setApiKey('api-key', $emailapikey);
-$emailprovider = new SendinBlue\Client\Api\TransactionalEmailsApi(
-  new GuzzleHttp\Client(),
-  $emailconfig
-);
-
 $clientname = "annie"; // default value might be wise to hit an existing mail address
 if (gethostname()) {
   $clientname = explode(".",gethostname())[0];
 }
+
+$emaildomain = $settings['mailgun']['domain'];
+$emailapiuri = $settings['mailgun']['apiuri'];
+$emailapikey = $settings['mailgun']['apikey'];
+require 'my_app_specific_mailgun_dir/autoload.php';
+use Mailgun\Mailgun;
+$mg = Mailgun::create($emailapikey, $emailapiuri);
+
+//
+//
+//
+
+/* mailSend
+- Generic email sending function.
+*/
+function mailSend($mailsender,$mailrecipients,$mailsubject,$mailbody,$mailtext,$mailtag) {
+  global $mg, $emaildomain, $clientname;
+
+  if (!isset($mailrecipients) || empty($mailrecipients)
+   || !isset($mailsubject) || !isset($mailbody) || !isset($mailtext)
+  ) {
+    return false;
+  }
+
+  if (!isset($mailsender)) {
+    //$mailsender = "Annie Advisor <".$clientname."@".$emaildomain.">";
+    $mailsender = "Annie Advisor <".$clientname."@annieadvisor.com>";
+  }
+
+  if (!isset($mailtag)) {
+    $mailtag = "default";
+  }
+
+  //Recipients
+  $mailrecipientsstr = "";
+  foreach ($mailrecipients as $mailrecipient) {
+    if ($mailrecipientsstr) { $mailrecipientsstr.=", "; }
+    $mailrecipientsstr.=$mailrecipient->{'email'};
+  }
+
+  //error_log("DEBUG: mailSend: $mailtag $mailsubject $mailrecipientsstr");
+  if (!$mailrecipientsstr) {
+    error_log("WARNING: mailSend: $mailtag $mailsubject with no recipients. Skipping send.");
+    return false;
+  } else {
+    // Now, compose and send your message.
+    // $mg->messages()->send($domain, $params);
+    $mgresult = $mg->messages()->send($emaildomain, [
+      'from'    => $mailsender,
+      'to'      => $mailrecipientsstr,
+      'subject' => $mailsubject,
+      'html'    => $mailbody,
+      'text'    => $mailtext,
+      'o:tag'   => $mailtag,
+      'inline' => array(
+        array(
+          'filePath' => 'https://annieadvisor.kinsta.cloud/app/uploads/2022/01/logo.png',
+          'filename' => 'logo.png'
+        )
+      )
+    ]);
+    //if ($mgresult) {
+    //  error_log("ERROR: mailSend: Email not sent: ".$mgresult);
+    //  return false;
+    //}
+  }
+  return true;
+}
+
+// Functions with predefined structures and placeholders (replaceables)
 
 // keyword list to replace from text template
 // nb! presetting here is not mandatory
@@ -53,336 +115,79 @@ function textUnTemplate($texttemplate) {
 
 /*
 */
-function mailOnInitiate($surveyrow,$destinations,$annieusers,$mailcontent,$lang) {
-  global $emailprovider, $replaceablevalues, $clientname;
+function mailOnSurveyStart($surveyrow,$destinations,$annieusers,$firstmessage,$mailcontent,$lang) {
+  global $replaceablevalues;
 
   if (!isset($surveyrow) || !isset($destinations) || !isset($annieusers) || !isset($mailcontent) || !isset($lang)) {
     return;
   }
-
-  $sendSmtpEmail = new SendinBlue\Client\Model\SendSmtpEmail();
+  if (!isset($firstmessage)) {
+    $firstmessage = "";
+  }
 
   $surveyconfig = json_decode($surveyrow->{'config'});
   if (array_key_exists('title', $surveyconfig)) {
     $surveyname = $surveyconfig->{'title'};
   }
 
-  // replaceables
   $replaceablevalues->{"contactcount"} = count($destinations);
   $replaceablevalues->{"surveyname"} = $surveyname;
+  $replaceablevalues->{"firstmessage"} = $firstmessage;
 
-  // subject
-  $sendSmtpEmail['subject'] = textUnTemplate($mailcontent->subject->$lang);
+  $mailsubject = textUnTemplate($mailcontent->subject->$lang);
 
-  // body
-  // header
-  $sendSmtpEmail['htmlContent'] = textUnTemplate($mailcontent->header->$lang);
-  // footer
-  // nb! catenate
-  $sendSmtpEmail['htmlContent'] .= textUnTemplate($mailcontent->footer->$lang);
+  $mailbody = textUnTemplate($mailcontent->html->$lang);
+  $mailtext = textUnTemplate($mailcontent->plaintext->$lang);
 
-  // meta
-  $sendSmtpEmail['sender'] = array('name' => 'Annie Advisor', 'email' => $clientname.'@annieadvisor.com');
-  // for each recipient (superuser or assigned to survey)
-  $mailrecipients = array();
-  foreach ($annieusers as $au) {
-    // check email format
-    if (filter_var($au->{'email'}, FILTER_VALIDATE_EMAIL)) {
-      array_push($mailrecipients,array('email' => $au->{'email'}));
-    }
-  }
-  if (empty($mailrecipients)) {
-    echo 'WARNING: No recipients for email', PHP_EOL;
-  } else {
-    $sendSmtpEmail['to'] = $mailrecipients;
-    $sendSmtpEmail['bcc'] = array(
-        array('email' => 'copy+'.$clientname.'@annieadvisor.com')
-    );
-    try {
-      $result = $emailprovider->sendTransacEmail($sendSmtpEmail);
-    } catch (Exception $e) {
-      echo 'ERROR: Exception when calling TransactionalEmailsApi->sendTransacEmail: ', $e->getMessage(), PHP_EOL;
-    }
-  }
-}
-
-
-/*
-*/
-function mailOnSurveyEnd($surveyrow,$supportneeds,$annieusers,$mailcontent,$lang) {
-  global $emailprovider, $replaceablevalues, $clientname;
-
-  if (!isset($surveyrow) || !isset($supportneeds) || !isset($annieusers) || !isset($mailcontent) || !isset($lang)) {
-    return;
-  }
-
-  $sendSmtpEmail = new SendinBlue\Client\Model\SendSmtpEmail();
-
-  // to-do-ish: should sanity check more, e.g. existance of 'config' etc.
-  $surveyconfig = json_decode($surveyrow->{'config'});
-  if (array_key_exists('title', $surveyconfig)) {
-    $surveyname = $surveyconfig->{'title'};
-  }
-
-  // replaceables
-  $replaceablevalues->{"surveyname"} = $surveyname;
-
-  // subject
-  $sendSmtpEmail['subject'] = textUnTemplate($mailcontent->subject->$lang);
-
-  // body
-  // header
-  $sendSmtpEmail['htmlContent'] = textUnTemplate($mailcontent->header->$lang);
-
-  // nb! case speciality: middle table
-  // must catenate to htmlContent
-  // TODO: some Finnish words still
-  $supportneedstatus1 = "";
-  $tmpjson = json_decode($surveyrow->{'supportneedstatus1'});
-  if ($tmpjson && array_key_exists($lang, $tmpjson)) {
-    $supportneedstatus1 = $tmpjson->{$lang};
-  }
-  $supportneedstatus2 = "";
-  $tmpjson = json_decode($surveyrow->{'supportneedstatus2'});
-  if ($tmpjson && array_key_exists($lang, $tmpjson)) {
-    $supportneedstatus2 = $tmpjson->{$lang};
-  }
-  $supportneedstatus100 = "";
-  $tmpjson = json_decode($surveyrow->{'supportneedstatus100'});
-  if ($tmpjson && array_key_exists($lang, $tmpjson)) {
-    $supportneedstatus100 = $tmpjson->{$lang};
-  }
-  if (count($supportneeds)==0) {
-    $sendSmtpEmail['htmlContent'] .= '
-    <p>Ei tuen tarpeita</p>
-    ';
-  } else {
-    $sendSmtpEmail['htmlContent'] .= '
-    <table>
-    <tr>
-    <td><b>Kategoria</b></td>
-    <td><b>'.$supportneedstatus1.'</b></td>
-    <td><b>'.$supportneedstatus2.'</b></td>
-    <td><b>'.$supportneedstatus100.'</b></td>
-    </tr>
-    ';
-    foreach ($supportneeds as $sn) {
-      $categoryname = "";
-      $tmpjson = json_decode($sn->{'categoryname'});
-      if ($tmpjson && array_key_exists($lang, $tmpjson)) {
-        $categoryname = $tmpjson->{$lang};
-      }
-      $sendSmtpEmail['htmlContent'] .= '
-      <tr>
-      <td>'.$categoryname.'</td>
-      <td>'.$sn->{'supportneedstatus1count'}.'</td>
-      <td>'.$sn->{'supportneedstatus2count'}.'</td>
-      <td>'.$sn->{'supportneedstatus100count'}.'</td>
-      </tr>
-      ';
-    }
-    $sendSmtpEmail['htmlContent'] .= '
-    </table>
-    ';
-  }
-
-  // footer
-  // nb! catenate
-  $sendSmtpEmail['htmlContent'] .= textUnTemplate($mailcontent->footer->$lang);
-
-  // meta
-  $sendSmtpEmail['sender'] = array('name' => 'Annie Advisor', 'email' => $clientname.'@annieadvisor.com');
-  // for each recipient (superuser or assigned to survey)
-  $mailrecipients = array();
-  foreach ($annieusers as $au) {
-    // check email format
-    if (filter_var($au->{'email'}, FILTER_VALIDATE_EMAIL)) {
-      array_push($mailrecipients,array('email' => $au->{'email'}));
-    }
-  }
-  if (empty($mailrecipients)) {
-    echo 'WARNING: No recipients for email', PHP_EOL;
-  } else {
-    $sendSmtpEmail['to'] = $mailrecipients;
-    $sendSmtpEmail['bcc'] = array(
-        array('email' => 'copy+'.$clientname.'@annieadvisor.com')
-    );
-    try {
-      $result = $emailprovider->sendTransacEmail($sendSmtpEmail);
-    } catch (Exception $e) {
-      echo 'ERROR: Exception when calling TransactionalEmailsApi->sendTransacEmail: ', $e->getMessage(), PHP_EOL;
-    }
-  }
-}
-
-function mailOnSurveyEndTeacher($surveyrow,$supportneeds,$annieuser,$mailcontent,$lang) {
-  global $emailprovider, $replaceablevalues, $clientname;
-
-  if (!isset($surveyrow) || !isset($supportneeds) || !isset($annieuser) || !isset($mailcontent) || !isset($lang)) {
-    return;
-  }
-
-  $sendSmtpEmail = new SendinBlue\Client\Model\SendSmtpEmail();
-
-  // to-do-ish: should sanity check more, e.g. existance of 'config' etc.
-  $surveyconfig = json_decode($surveyrow->{'config'});
-  if (array_key_exists('title', $surveyconfig)) {
-    $surveyname = $surveyconfig->{'title'};
-  }
-
-  // replaceables
-  $replaceablevalues->{"surveyname"} = $surveyname;
-  $replaceablevalues->{"teachername"} = "";
-  if (array_key_exists("firstname", $annieuser)) {
-    $replaceablevalues->{"teachername"} = $annieuser->{'firstname'};
-  }
-
-  // subject
-  $sendSmtpEmail['subject'] = textUnTemplate($mailcontent->subject->$lang);
-
-  // body
-  // header
-  $sendSmtpEmail['htmlContent'] = textUnTemplate($mailcontent->header->$lang);
-
-  // nb! case speciality: middle table
-  // must catenate to htmlContent
-  // TODO: some Finnish words still
-  $supportneedstatus1 = "";
-  $tmpjson = json_decode($surveyrow->{'supportneedstatus1'});
-  if ($tmpjson && array_key_exists($lang, $tmpjson)) {
-    $supportneedstatus1 = $tmpjson->{$lang};
-  }
-  $supportneedstatus2 = "";
-  $tmpjson = json_decode($surveyrow->{'supportneedstatus2'});
-  if ($tmpjson && array_key_exists($lang, $tmpjson)) {
-    $supportneedstatus2 = $tmpjson->{$lang};
-  }
-  $supportneedstatus100 = "";
-  $tmpjson = json_decode($surveyrow->{'supportneedstatus100'});
-  if ($tmpjson && array_key_exists($lang, $tmpjson)) {
-    $supportneedstatus100 = $tmpjson->{$lang};
-  }
-  if (count($supportneeds)==0) {
-    $sendSmtpEmail['htmlContent'] .= '
-    <p>Ei tuen tarpeita</p>
-    ';
-  } else {
-    $sendSmtpEmail['htmlContent'] .= '
-    <table>
-    <tr>
-    <td><b>Kategoria</b></td>
-    <td><b>'.$supportneedstatus1.'</b></td>
-    <td><b>'.$supportneedstatus2.'</b></td>
-    <td><b>'.$supportneedstatus100.'</b></td>
-    </tr>
-    ';
-    foreach ($supportneeds as $sn) {
-      $categoryname = "";
-      $tmpjson = json_decode($sn->{'categoryname'});
-      if ($tmpjson && array_key_exists($lang, $tmpjson)) {
-        $categoryname = $tmpjson->{$lang};
-      }
-      $sendSmtpEmail['htmlContent'] .= '
-      <tr>
-      <td>'.$categoryname.'</td>
-      <td>'.$sn->{'supportneedstatus1count'}.'</td>
-      <td>'.$sn->{'supportneedstatus2count'}.'</td>
-      <td>'.$sn->{'supportneedstatus100count'}.'</td>
-      </tr>
-      ';
-    }
-    $sendSmtpEmail['htmlContent'] .= '
-    </table>
-    ';
-  }
-
-  // footer
-  // nb! catenate
-  $sendSmtpEmail['htmlContent'] .= textUnTemplate($mailcontent->footer->$lang);
-
-  // meta
-  $sendSmtpEmail['sender'] = array('name' => 'Annie Advisor', 'email' => $clientname.'@annieadvisor.com');
-  // for each recipient (superuser or assigned to survey)
-  $mailrecipients = array();
-  // check email format
-  if (filter_var($annieuser->{'email'}, FILTER_VALIDATE_EMAIL)) {
-    array_push($mailrecipients,array('email' => $annieuser->{'email'}));
-  }
-  if (empty($mailrecipients)) {
-    echo 'WARNING: No recipients for email', PHP_EOL;
-  } else {
-    $sendSmtpEmail['to'] = $mailrecipients;
-    $sendSmtpEmail['bcc'] = array(
-        array('email' => 'copy+'.$clientname.'@annieadvisor.com')
-    );
-    try {
-      $result = $emailprovider->sendTransacEmail($sendSmtpEmail);
-    } catch (Exception $e) {
-      echo 'ERROR: Exception when calling TransactionalEmailsApi->sendTransacEmail: ', $e->getMessage(), PHP_EOL;
-    }
-  }
+  mailSend(null,$annieusers,$mailsubject,$mailbody,$mailtext,"surveyStart");
 }
 
 /* "When a new supportneed is created that a certain annieuser is responsible for"
 */
-function mailOnSupportneedImmediate($firstname,$lastname,$surveyname,$categoryname,$annieusers,$mailcontent,$lang) {
-  global $emailprovider, $replaceablevalues, $clientname;
+function mailOnSupportneedImmediate($firstname,$lastname,$surveyname,$categoryname,$supportneed,$firstmessage,$nextmessage,$annieusers,$mailcontent,$lang) {
+  global $replaceablevalues;
 
-  if (!isset($firstname) || !isset($lastname) || !isset($surveyname) || !isset($categoryname)
-   || !isset($annieusers) || !isset($mailcontent) || !isset($lang)
-  ) {
+  if (!isset($firstname) || !isset($lastname) || !isset($surveyname) || !isset($categoryname)) {
+    return;
+  }
+  if (!isset($supportneed)) {
+    $supportneed = "";
+  }
+  if (!isset($firstmessage)) {
+    $firstmessage = "";
+  }
+  if (!isset($nextmessage)) {
+    $nextmessage = "";
+  }
+  if (!isset($annieusers) || !isset($lang)) {
+    return;
+  }
+  if (!isset($mailcontent)) {
+    return;
+  } else if (!array_key_exists('subject', $mailcontent) || !array_key_exists('html', $mailcontent) || !array_key_exists('plaintext', $mailcontent)) {
     return;
   }
 
-  $sendSmtpEmail = new SendinBlue\Client\Model\SendSmtpEmail();
-
-  // replaceables
   $replaceablevalues->{"firstname"} = $firstname;
   $replaceablevalues->{"lastname"} = $lastname;
   $replaceablevalues->{"surveyname"} = $surveyname;
   $replaceablevalues->{"supportneedcategory"} = $categoryname->$lang;
+  $replaceablevalues->{"supportneedid"} = $supportneed;
+  $replaceablevalues->{"lastmessage"} = $nextmessage;
+  $replaceablevalues->{"firstmessage"} = $firstmessage;
 
-  // subject
-  $sendSmtpEmail['subject'] = textUnTemplate($mailcontent->subject->$lang);
+  $mailsubject = textUnTemplate($mailcontent->subject->$lang);
 
-  // body
-  // header
-  $sendSmtpEmail['htmlContent'] = textUnTemplate($mailcontent->header->$lang);
-  // footer
-  // nb! catenate
-  $sendSmtpEmail['htmlContent'] .= textUnTemplate($mailcontent->footer->$lang);
+  $mailbody = textUnTemplate($mailcontent->html->$lang);
+  $mailtext = textUnTemplate($mailcontent->plaintext->$lang);
 
-  // meta
-  $sendSmtpEmail['sender'] = array('name' => 'Annie Advisor', 'email' => $clientname.'@annieadvisor.com');
-  // for each recipient (superuser or assigned to survey)
-  $mailrecipients = array();
-  foreach ($annieusers as $au) {
-    // check email format
-    if (filter_var($au->{'email'}, FILTER_VALIDATE_EMAIL)) {
-      array_push($mailrecipients,array('email' => $au->{'email'}));
-    }
-  }
-  if (empty($mailrecipients)) {
-    echo 'WARNING: No recipients for email', PHP_EOL;
-  } else {
-    $sendSmtpEmail['to'] = $mailrecipients;
-    $sendSmtpEmail['bcc'] = array(
-        array('email' => 'copy+'.$clientname.'@annieadvisor.com')
-    );
-
-    // send
-    try {
-      $result = $emailprovider->sendTransacEmail($sendSmtpEmail);
-    } catch (Exception $e) {
-      echo 'ERROR: Exception when calling TransactionalEmailsApi->sendTransacEmail: ', $e->getMessage(), PHP_EOL;
-    }
-  }
+  mailSend(null,$annieusers,$mailsubject,$mailbody,$mailtext,"supportneedImmediate");
 }
 
 /* "When a new message to existing supportneed arrives notify responsible for annieuser"
 */
-function mailOnMessageToSupportneedImmediate($firstname,$lastname,$surveyname,$categoryname,$annieusers,$mailcontent,$lang) {
-  global $emailprovider, $replaceablevalues, $clientname;
+function mailOnMessageToSupportneedImmediate($firstname,$lastname,$surveyname,$categoryname,$supportneed,$annieusers,$mailcontent,$lang) {
+  global $replaceablevalues;
 
   if (!isset($firstname) || !isset($lastname) || !isset($surveyname) || !isset($categoryname)
    || !isset($annieusers) || !isset($mailcontent) || !isset($lang)
@@ -390,100 +195,53 @@ function mailOnMessageToSupportneedImmediate($firstname,$lastname,$surveyname,$c
     return;
   }
 
-  $sendSmtpEmail = new SendinBlue\Client\Model\SendSmtpEmail();
-
-  // replaceables
   $replaceablevalues->{"firstname"} = $firstname;
   $replaceablevalues->{"lastname"} = $lastname;
   $replaceablevalues->{"surveyname"} = $surveyname;
   $replaceablevalues->{"supportneedcategory"} = $categoryname->$lang;
+  $replaceablevalues->{"supportneedid"} = $supportneed;
 
-  // subject
-  $sendSmtpEmail['subject'] = textUnTemplate($mailcontent->subject->$lang);
+  $mailsubject = textUnTemplate($mailcontent->subject->$lang);
 
-  // body
-  // header
-  $sendSmtpEmail['htmlContent'] = textUnTemplate($mailcontent->header->$lang);
-  // footer
-  // nb! catenate
-  $sendSmtpEmail['htmlContent'] .= textUnTemplate($mailcontent->footer->$lang);
+  $mailbody = textUnTemplate($mailcontent->html->$lang);
+  $mailtext = textUnTemplate($mailcontent->plaintext->$lang);
 
-  // meta
-  $sendSmtpEmail['sender'] = array('name' => 'Annie Advisor', 'email' => $clientname.'@annieadvisor.com');
-  // for each recipient (superuser or assigned to survey)
-  $mailrecipients = array();
-  foreach ($annieusers as $au) {
-    // check email format
-    if (filter_var($au->{'email'}, FILTER_VALIDATE_EMAIL)) {
-      array_push($mailrecipients,array('email' => $au->{'email'}));
-    }
-  }
-  if (empty($mailrecipients)) {
-    echo 'WARNING: No recipients for email', PHP_EOL;
-  } else {
-    $sendSmtpEmail['to'] = $mailrecipients;
-    $sendSmtpEmail['bcc'] = array(
-        array('email' => 'copy+'.$clientname.'@annieadvisor.com')
-    );
-
-    // send
-    try {
-      $result = $emailprovider->sendTransacEmail($sendSmtpEmail);
-    } catch (Exception $e) {
-      echo 'ERROR: Exception when calling TransactionalEmailsApi->sendTransacEmail: ', $e->getMessage(), PHP_EOL;
-    }
-  }
+  mailSend(null,$annieusers,$mailsubject,$mailbody,$mailtext,"messageToSupportneedImmediate");
 }
 
-
-/*
+/* "Remind support providers & teachers of support requests with email that are in status 1 or 2."
 */
-function mailOnDailyDigest($annieusers,$mailcontent,$lang) {
-  global $emailprovider, $replaceablevalues, $clientname;
+function mailOnReminder($contactdata,$supportneed,$firstmessage,$lastmessage,$annieusers,$mailcontent,$lang) {
+  global $replaceablevalues;
 
-  if (!isset($annieusers) || !isset($mailcontent) || !isset($lang)) {
+  if (!isset($contactdata)) {
+    return;
+  } else if (!array_key_exists('firstname', $contactdata) || !array_key_exists('lastname', $contactdata)) {
+    return;
+  }
+  if (!isset($supportneed) || !isset($annieusers) || !isset($lang)) {
+    return;
+  }
+  if (!isset($lastmessage)) {
+    $lastmessage = "";
+  }
+  if (!isset($mailcontent)) {
+    return;
+  } else if (!array_key_exists('subject', $mailcontent) || !array_key_exists('html', $mailcontent) || !array_key_exists('plaintext', $mailcontent)) {
     return;
   }
 
-  $sendSmtpEmail = new SendinBlue\Client\Model\SendSmtpEmail();
+  //$replaceablevalues->{"hostname"} = $clientname;
+  $replaceablevalues->{"firstname"} = $contactdata->firstname;
+  $replaceablevalues->{"lastname"} = $contactdata->lastname;
+  $replaceablevalues->{"supportneedid"} = $supportneed;
+  $replaceablevalues->{"firstmessage"} = $firstmessage;
+  $replaceablevalues->{"lastmessage"} = $lastmessage;
 
-  // subject
-  $sendSmtpEmail['subject'] = textUnTemplate($mailcontent->subject->$lang);
+  $mailsubject = textUnTemplate($mailcontent->subject->$lang);
 
-  // meta
-  $sendSmtpEmail['sender'] = array('name' => 'Annie Advisor', 'email' => $clientname.'@annieadvisor.com');
-  $sendSmtpEmail['bcc'] = array(
-      array('email' => 'copy+'.$clientname.'@annieadvisor.com')
-  );
+  $mailbody = textUnTemplate($mailcontent->html->$lang);
+  $mailtext = textUnTemplate($mailcontent->plaintext->$lang);
 
-  // body & send
-
-  // for each recipient (superuser or assigned to survey)
-  // nb! separately for this one, though
-  foreach ($annieusers as $au) {
-    // check email format
-    if (filter_var($au->{'email'}, FILTER_VALIDATE_EMAIL)) {
-      $mailrecipients = array();
-      array_push($mailrecipients,array('email' => $au->{'email'}));
-      $sendSmtpEmail['to'] = $mailrecipients;
-
-      // replaceables
-      $replaceablevalues->{"newmessagecount"} = $au->{'messagecount'};
-      $replaceablevalues->{"supportneedcount"} = $au->{'supportneedcount'};
-
-      // header
-      $sendSmtpEmail['htmlContent'] = textUnTemplate($mailcontent->header->$lang);
-      // footer
-      // nb! catenate!
-      $sendSmtpEmail['htmlContent'] .= textUnTemplate($mailcontent->footer->$lang);
-
-      // send
-      try {
-        $result = $emailprovider->sendTransacEmail($sendSmtpEmail);
-      } catch (Exception $e) {
-        echo 'ERROR: Exception when calling TransactionalEmailsApi->sendTransacEmail: ', $e->getMessage(), PHP_EOL;
-      }
-    }
-  }
-
+  mailSend(null,$annieusers,$mailsubject,$mailbody,$mailtext,"reminder");
 }

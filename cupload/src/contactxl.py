@@ -42,7 +42,7 @@ def writedata(df, verbose):
     else:
       # fix phonenumber
       r["phonenumber"] = r["phonenumber"].replace("(0)","")
-      r["phonenumber"] = r["phonenumber"].replace(" ","")
+      r["phonenumber"] = re.sub(r'\s', "", r["phonenumber"])
       r["phonenumber"] = r["phonenumber"].replace("-","")
       if not r["phonenumber"]: dataok = False
       else:

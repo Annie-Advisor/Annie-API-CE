@@ -128,11 +128,26 @@ if (isset($contactnumber) && isset($contactid) && isset($survey) && isset($categ
     $categoryname = (object)array($lang => $category); // default to code?
   }
 
+  // AD-371 query for support need "request" id which is the first id of supportneed by contact+survey
+  $sql = "
+  select min(id) as supportneedrequestid
+  from $dbschm.supportneedhistory
+  where contact=:contact
+  and survey=:survey
+  group by contact, survey
+  ";
+  $sth = $dbh->prepare($sql);
+  $sth->bindParam(':contact', $contactid);
+  $sth->bindParam(':survey', $survey);
+  $sth->execute();
+  $res = $sth->fetch(PDO::FETCH_OBJ);
+  $supportneed = isset($res->supportneedrequestid) ? $res->supportneedrequestid : null;
+
   //error_log("DEBUG: SupportProcess: MAIL firstname=$firstname lastname=$lastname surveyname($survey)=".json_encode($surveyname)." categoryname($category)=".json_encode($categoryname)." annieusers=[".implode(",",$annieusers)."]");
   if (isset($firstname) && isset($lastname) && isset($surveyname) && isset($categoryname)
    && isset($annieusers) && !empty($annieusers) && isset($mailcontent) && isset($lang)
   ) {
-    mailOnMessageToSupportneedImmediate($firstname,$lastname,$surveyname,$categoryname,$annieusers,$mailcontent,$lang);
+    mailOnMessageToSupportneedImmediate($firstname,$lastname,$surveyname,$categoryname,$supportneed,$annieusers,$mailcontent,$lang);
   }
 
 }//- mandatory variables

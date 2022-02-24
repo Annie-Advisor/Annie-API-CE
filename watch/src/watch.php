@@ -1,6 +1,6 @@
 <?php
 /* watch.php
- * Copyright (c) 2021 Annie Advisor
+ * Copyright (c) 2021-2022 Annie Advisor
  * All rights reserved.
  * Contributors:
  *  Lauri Jokipii <lauri.jokipii@annieadvisor.com>
@@ -79,11 +79,11 @@ if (php_sapi_name() != "cli") {
   }
 
   // fetch additional configs
-  $sql = "select value from $dbschm.config where segment='mail' and field='dailyDigestSchedule'";
+  $sql = "select value from $dbschm.config where segment='ui' and field='language'";
   $sth = $dbh->prepare($sql);
   $sth->execute();
   $res = $sth->fetch(PDO::FETCH_OBJ);
-  $maildailydigestschedule = isset($res->value) ? json_decode($res->value) : null;
+  $lang = isset($res->value) ? json_decode($res->value) : null;
 
   require_once 'my_app_specific_library_dir/mail.php';
 } // - setup block
@@ -91,6 +91,316 @@ if (php_sapi_name() != "cli") {
 //
 // BEGIN
 //
+
+//: "provider & teacher reminder 1"
+{
+  $sql = "
+  with conf as (
+    select
+      (mailfirstreminderdelay.value)::int delay
+    , (mailfirstreminderdelay.value)::int/60/24 delaydays
+    , (watchdoginterval.value)::int as interval
+    , (watchdogstarttime.value#>>'{}')::text as starttime
+    , (watchdogstarttime.value#>>'{}')::int/100 as starthour
+    , (watchdogendtime.value#>>'{}')::text as endtime
+    , (watchdogendtime.value#>>'{}')::int/100 as endhour
+    from $dbschm.config watchdoginterval
+    , $dbschm.config watchdogstarttime
+    , $dbschm.config watchdogendtime
+    , $dbschm.config mailfirstreminderdelay
+    where 1=1
+    and watchdoginterval.segment = 'watchdog' and watchdoginterval.field = 'interval'
+    and watchdogstarttime.segment = 'watchdog' and watchdogstarttime.field = 'starttime'
+    and watchdogendtime.segment = 'watchdog' and watchdogendtime.field = 'endtime'
+    and mailfirstreminderdelay.segment = 'mail' and mailfirstreminderdelay.field = 'firstReminderDelay'
+    limit 1 --max 1 row!
+  )
+
+  , users as (
+    select annieuser.id, annieuser.meta, annieuser.iv
+    , sn.id as supportneed
+    , sn.updated
+    , sn.survey
+    , sn.contact
+    , contact.contact as contactdata, contact.iv as contactiv
+    from $dbschm.annieuser
+    join $dbschm.annieusersurvey aus on aus.annieuser = annieuser.id
+    join $dbschm.supportneedhistory sn on sn.survey = aus.survey
+      and (aus.meta->'category'->sn.category)::boolean
+    join $dbschm.contact on contact.id = sn.contact
+    where annieuser.notifications = 'IMMEDIATE'
+    and sn.status in ('1','2')
+    -- latest supportneed row
+    and sn.id = (
+      select max(id) from $dbschm.supportneedhistory
+      where contact = sn.contact and survey = sn.survey
+    )
+    union
+    select annieuser.id, annieuser.meta, annieuser.iv
+    , sn.id as supportneed
+    , sn.updated
+    , sn.survey
+    , sn.contact
+    , contact.contact as contactdata, contact.iv as contactiv
+    from $dbschm.annieuser
+    join $dbschm.contact on contact.annieuser = annieuser.id
+    join $dbschm.supportneedhistory sn on sn.contact = contact.id
+      -- drop those belonging to support providers
+      and sn.id not in (
+        select supportneedhistory.id
+        from $dbschm.supportneedhistory
+        join $dbschm.annieusersurvey on annieusersurvey.survey = supportneedhistory.survey
+        where supportneedhistory.contact = contact.id
+        and (annieusersurvey.meta->'category'->supportneedhistory.category)::boolean
+      )
+    cross join conf
+    where annieuser.notifications = 'IMMEDIATE'
+    and sn.status in ('1','2')
+    -- latest supportneed row
+    and sn.id = (
+      select max(id) from $dbschm.supportneedhistory
+      where contact = sn.contact and survey = sn.survey
+    )
+  )
+
+  select users.id, users.meta, users.iv
+  , users.supportneed
+  , users.survey
+  , users.contact, contactdata, contactiv
+  , m1.body firstmessagecr, m1.iv firstmessageiv
+  , m2.body lastmessagecr, m2.iv lastmessageiv
+  from users
+  join $dbschm.message m1 on m1.contact = users.contact and m1.survey = users.survey
+    and m1.created = (
+        select min(created) from $dbschm.message
+        where contact=m1.contact and survey=m1.survey
+        and status='DELIVERED' --sender ~ Annie
+    )
+  join $dbschm.message m2 on m2.contact = users.contact and m2.survey = users.survey
+    and m2.created = (
+        select max(created) from $dbschm.message
+        where contact=m2.contact and survey=m2.survey
+        and status='DELIVERED' --sender ~ Annie
+    )
+  cross join conf
+  where 1=1
+  -- has time passed reminder delay but no more than delay + wathdog interval
+  -- nomore < updated < notyet
+  -- outside of watchdog time window => next day first run
+  and
+  case
+  -- check if updated matches time window
+  when extract('hour' from users.updated) between conf.starthour and conf.endhour
+  then
+    case
+    when users.updated between (now() - make_interval(mins := conf.delay + conf.interval)) and (now() - make_interval(mins := conf.delay))
+    then true
+    else false
+    end  
+  else -- updated NOT in time window
+    case
+    -- match to delay days
+    when users.updated between (now() - make_interval(days := conf.delaydays + 1)) and (now() - make_interval(days := conf.delaydays))
+    -- match to first run of the day (no certainty of exact runtime but lets trust that +-3 min time window will suffice)
+     and conf.starttime between to_char(now() - make_interval(mins := 3),'HH24:MI') and to_char(now() + make_interval(mins := 3),'HH24:MI')
+    then true
+    else false
+    end  
+  end
+  ";
+  $sth = $dbh->prepare($sql);
+  $sth->execute();
+  $remindees = json_decode(json_encode($sth->fetchAll(PDO::FETCH_ASSOC)));
+  printf(date("Y-m-d H:i:s")."%4s  "."provider & teacher reminder 1".PHP_EOL, count($remindees));
+
+  if (count($remindees)>=1) {
+
+    $sql = "select value from $dbschm.config where segment='mail' and field='firstReminder'";
+    $sth = $dbh->prepare($sql);
+    $sth->execute();
+    $res = $sth->fetch(PDO::FETCH_OBJ);
+    $mailcontent = isset($res->value) ? json_decode($res->value) : null;
+
+    foreach ($remindees as $r) {
+      $annieuser = (object)array("id" => $r->{'id'});
+      $iv = base64_decode($r->{'iv'});
+      $annieusermeta = json_decode(decrypt($r->{'meta'},$iv));
+      if (isset($annieusermeta)
+       && array_key_exists('email', $annieusermeta)
+      ) {
+        $annieuser->{'email'} = $annieusermeta->{'email'};
+        $supportneed = $r->{'supportneed'};
+        $survey = $r->{'survey'};
+        $contact = $r->{'contact'};
+        $contactiv = base64_decode($r->{'contactiv'});
+        $contactdata = json_decode(decrypt($r->{'contactdata'},$contactiv));
+        $firstmessageiv = base64_decode($r->{'firstmessageiv'});
+        $firstmessage = decrypt($r->{'firstmessagecr'},$firstmessageiv);
+        $lastmessageiv = base64_decode($r->{'lastmessageiv'});
+        $lastmessage = decrypt($r->{'lastmessagecr'},$lastmessageiv);
+        // actions
+        if (isset($annieuser) && isset($mailcontent) && isset($lang)) {
+          mailOnReminder($contactdata,$supportneed,$firstmessage,$lastmessage,array($annieuser),$mailcontent,$lang);
+        }
+      }
+    }
+  }
+} // - "provider & teacher reminder 1"
+
+//: "provider & teacher reminder 2"
+{
+  $sql = "
+  with conf as (
+    select
+      (mailsecondreminderdelay.value)::int delay
+    , (mailsecondreminderdelay.value)::int/60/24 delaydays
+    , (watchdoginterval.value)::int as interval
+    , (watchdogstarttime.value#>>'{}')::text as starttime
+    , (watchdogstarttime.value#>>'{}')::int/100 as starthour
+    , (watchdogendtime.value#>>'{}')::text as endtime
+    , (watchdogendtime.value#>>'{}')::int/100 as endhour
+    from $dbschm.config watchdoginterval
+    , $dbschm.config watchdogstarttime
+    , $dbschm.config watchdogendtime
+    , $dbschm.config mailsecondreminderdelay
+    where 1=1
+    and watchdoginterval.segment = 'watchdog' and watchdoginterval.field = 'interval'
+    and watchdogstarttime.segment = 'watchdog' and watchdogstarttime.field = 'starttime'
+    and watchdogendtime.segment = 'watchdog' and watchdogendtime.field = 'endtime'
+    and mailsecondreminderdelay.segment = 'mail' and mailsecondreminderdelay.field = 'secondReminderDelay'
+    limit 1 --max 1 row!
+  )
+
+  , users as (
+    select annieuser.id, annieuser.meta, annieuser.iv
+    , sn.id as supportneed
+    , sn.updated
+    , sn.survey
+    , sn.contact
+    , contact.contact as contactdata, contact.iv as contactiv
+    from $dbschm.annieuser
+    join $dbschm.annieusersurvey aus on aus.annieuser = annieuser.id
+    join $dbschm.supportneedhistory sn on sn.survey = aus.survey
+      and (aus.meta->'category'->sn.category)::boolean
+    join $dbschm.contact on contact.id = sn.contact
+    where annieuser.notifications = 'IMMEDIATE'
+    and sn.status in ('1','2')
+    -- latest supportneed row
+    and sn.id = (
+      select max(id) from $dbschm.supportneedhistory
+      where contact = sn.contact and survey = sn.survey
+    )
+    union
+    select annieuser.id, annieuser.meta, annieuser.iv
+    , sn.id as supportneed
+    , sn.updated
+    , sn.survey
+    , sn.contact
+    , contact.contact as contactdata, contact.iv as contactiv
+    from $dbschm.annieuser
+    join $dbschm.contact on contact.annieuser = annieuser.id
+    join $dbschm.supportneedhistory sn on sn.contact = contact.id
+      -- drop those belonging to support providers
+      and sn.id not in (
+        select supportneedhistory.id
+        from $dbschm.supportneedhistory
+        join $dbschm.annieusersurvey on annieusersurvey.survey = supportneedhistory.survey
+        where supportneedhistory.contact = contact.id
+        and (annieusersurvey.meta->'category'->supportneedhistory.category)::boolean
+      )
+    cross join conf
+    where annieuser.notifications = 'IMMEDIATE'
+    and sn.status in ('1','2')
+    -- latest supportneed row
+    and sn.id = (
+      select max(id) from $dbschm.supportneedhistory
+      where contact = sn.contact and survey = sn.survey
+    )
+  )
+
+  select users.id, users.meta, users.iv
+  , users.supportneed
+  , users.survey
+  , users.contact, contactdata, contactiv
+  , m1.body firstmessagecr, m1.iv firstmessageiv
+  , m2.body lastmessagecr, m2.iv lastmessageiv
+  from users
+  join $dbschm.message m1 on m1.contact = users.contact and m1.survey = users.survey
+    and m1.created = (
+        select min(created) from $dbschm.message
+        where contact=m1.contact and survey=m1.survey
+        and status='DELIVERED' --sender ~ Annie
+    )
+  join $dbschm.message m2 on m2.contact = users.contact and m2.survey = users.survey
+    and m2.created = (
+        select max(created) from $dbschm.message
+        where contact=m2.contact and survey=m2.survey
+        and status='DELIVERED' --sender ~ Annie
+    )
+  cross join conf
+  where 1=1
+  -- has time passed reminder delay but no more than delay + wathdog interval
+  -- nomore < updated < notyet
+  -- outside of watchdog time window => next day first run
+  and
+  case
+  -- check if updated matches time window
+  when extract('hour' from users.updated) between conf.starthour and conf.endhour
+  then
+    case
+    when users.updated between (now() - make_interval(mins := conf.delay + conf.interval)) and (now() - make_interval(mins := conf.delay))
+    then true
+    else false
+    end  
+  else -- updated NOT in time window
+    case
+    -- match to delay days
+    when users.updated between (now() - make_interval(days := conf.delaydays + 1)) and (now() - make_interval(days := conf.delaydays))
+    -- match to first run of the day (no certainty of exact runtime but lets trust that +-3 min time window will suffice)
+     and conf.starttime between to_char(now() - make_interval(mins := 3),'HH24:MI') and to_char(now() + make_interval(mins := 3),'HH24:MI')
+    then true
+    else false
+    end  
+  end
+  ";
+  $sth = $dbh->prepare($sql);
+  $sth->execute();
+  $remindees = json_decode(json_encode($sth->fetchAll(PDO::FETCH_ASSOC)));
+  printf(date("Y-m-d H:i:s")."%4s  "."provider & teacher reminder 2".PHP_EOL, count($remindees));
+
+  if (count($remindees)>=1) {
+
+    $sql = "select value from $dbschm.config where segment='mail' and field='secondReminder'";
+    $sth = $dbh->prepare($sql);
+    $sth->execute();
+    $res = $sth->fetch(PDO::FETCH_OBJ);
+    $mailcontent = isset($res->value) ? json_decode($res->value) : null;
+
+    foreach ($remindees as $r) {
+      $annieuser = (object)array("id" => $r->{'id'});
+      $iv = base64_decode($r->{'iv'});
+      $annieusermeta = json_decode(decrypt($r->{'meta'},$iv));
+      if (isset($annieusermeta)
+       && array_key_exists('email', $annieusermeta)
+      ) {
+        $annieuser->{'email'} = $annieusermeta->{'email'};
+        $supportneed = $r->{'supportneed'};
+        $survey = $r->{'survey'};
+        $contact = $r->{'contact'};
+        $contactiv = base64_decode($r->{'contactiv'});
+        $contactdata = json_decode(decrypt($r->{'contactdata'},$contactiv));
+        $firstmessageiv = base64_decode($r->{'firstmessageiv'});
+        $firstmessage = decrypt($r->{'firstmessagecr'},$firstmessageiv);
+        $lastmessageiv = base64_decode($r->{'lastmessageiv'});
+        $lastmessage = decrypt($r->{'lastmessagecr'},$lastmessageiv);
+        // actions
+        if (isset($annieuser) && isset($mailcontent) && isset($lang)) {
+          mailOnReminder($contactdata,$supportneed,$firstmessage,$lastmessage,array($annieuser),$mailcontent,$lang);
+        }
+      }
+    }
+  }
+} // - "provider & teacher reminder 2"
 
 //: "survey end"
 {
@@ -126,31 +436,10 @@ if (php_sapi_name() != "cli") {
   $sth->execute();
   //printf(date("Y-m-d H:i:s")."%4s  "."survey end".PHP_EOL, $sth->rowCount());
 
-  // send email
-  // query data for email placeholders
+  // query data for followup
   $sql = "
   select id as survey
   , followup
-  , config
-  , (
-    select count(distinct contact)
-    from $dbschm.contactsurvey
-    where survey = survey.id
-    -- last one for contact+survey:
-    and (contact,survey,updated) in (
-      select cs.contact,cs.survey,max(cs.updated)
-      from $dbschm.contactsurvey cs
-      group by cs.contact,cs.survey
-    )
-  ) as contactcount
-  , (
-    select count(distinct contact)
-    from $dbschm.supportneed
-    where survey = survey.id
-  ) as supportneedcount
-  , (select value from $dbschm.codes where codeset='supportNeedStatus' and code='1') as supportneedstatus1
-  , (select value from $dbschm.codes where codeset='supportNeedStatus' and code='2') as supportneedstatus2
-  , (select value from $dbschm.codes where codeset='supportNeedStatus' and code='100') as supportneedstatus100
   from $dbschm.survey
   where survey.status = 'IN PROGRESS'
   and now() > survey.endtime
@@ -159,141 +448,6 @@ if (php_sapi_name() != "cli") {
   $sth->execute();
   $surveys = json_decode(json_encode($sth->fetchAll(PDO::FETCH_ASSOC)));
   foreach ($surveys as $surveyrow) {
-    // supportneeds by category (for email table data)
-    $sql = "
-    select category
-    , coalesce(
-        (select value from $dbschm.codes where codeset='category' and code=category)
-        ,jsonb_build_object('fi',category,'sv',category,'en',category)
-      ) as categoryname
-    , sum(case when status='1' then 1 else 0 end) as supportneedstatus1count
-    , sum(case when status='2' then 1 else 0 end) as supportneedstatus2count
-    , sum(case when status='100' then 1 else 0 end) as supportneedstatus100count
-    from $dbschm.supportneed
-    where survey=:survey
-    group by category
-    ";
-    $sth = $dbh->prepare($sql);
-    $sth->bindParam(':survey', $surveyrow->{'survey'});
-    $sth->execute();
-    $supportneeds = json_decode(json_encode($sth->fetchAll(PDO::FETCH_ASSOC)));
-    // users with access (for email "To")
-    $sql = "
-    select id, meta, iv
-    from $dbschm.annieuser
-    where (superuser = true or id in (
-      select annieuser
-      from $dbschm.annieusersurvey
-      left join jsonb_each(meta->'category') j on 1=1
-      where survey = :survey
-      -- either coordinator or support provider (via category) is set
-      and meta is not null
-      and (
-        (meta->'coordinator' is not null and (meta->'coordinator')::boolean)
-        or
-        (meta->'category' is not null and j.value::boolean = true)
-      )
-    ))
-    and coalesce(notifications,'DISABLED') != 'DISABLED'
-    ";
-    $sth = $dbh->prepare($sql);
-    $sth->bindParam(':survey', $surveyrow->{'survey'});
-    $sth->execute();
-    $annieuserrows = json_decode(json_encode($sth->fetchAll(PDO::FETCH_ASSOC)));
-    $annieusers = array();
-    foreach ($annieuserrows as $au) {
-      $annieuser = (object)array("id" => $au->{'id'});
-      $iv = base64_decode($au->{'iv'});
-      $annieusermeta = json_decode(decrypt($au->{'meta'},$iv));
-      if (isset($annieusermeta) && array_key_exists('email', $annieusermeta)) {
-        $annieuser->{'email'} = $annieusermeta->{'email'};
-        array_push($annieusers, $annieuser);
-      }
-    }
-
-    $sql = "select value from $dbschm.config where segment='mail' and field='surveyEnd'";
-    $sth = $dbh->prepare($sql);
-    $sth->execute();
-    $res = $sth->fetch(PDO::FETCH_OBJ);
-    $mailcontent = isset($res->value) ? json_decode($res->value) : null;
-
-    $sql = "select value from $dbschm.config where segment='ui' and field='language'";
-    $sth = $dbh->prepare($sql);
-    $sth->execute();
-    $res = $sth->fetch(PDO::FETCH_OBJ);
-    $lang = isset($res->value) ? json_decode($res->value) : null;
-
-    if (isset($surveyrow) && isset($supportneeds) && isset($annieusers) && count($annieusers)>0 && isset($mailcontent) && isset($lang)) {
-      mailOnSurveyEnd($surveyrow,$supportneeds,$annieusers,$mailcontent,$lang);
-    }
-
-    // AD-275 Survey end notification for teachers
-    $sql = "
-    select annieuser.id
-    , annieuser.meta
-    , annieuser.iv
-    from $dbschm.supportneed
-    join $dbschm.contact on contact.id=supportneed.contact
-    join $dbschm.annieuser on annieuser.id=contact.annieuser
-    where supportneed.survey=:survey
-    and coalesce(annieuser.notifications,'DISABLED') != 'DISABLED'
-    group by annieuser.id, annieuser.meta, annieuser.iv
-    ";
-    $sth = $dbh->prepare($sql);
-    $sth->bindParam(':survey', $surveyrow->{'survey'});
-    $sth->execute();
-    $annieusers = json_decode(json_encode($sth->fetchAll(PDO::FETCH_ASSOC)));
-
-    foreach ($annieusers as $au) {
-      $annieuser = (object)array("id" => $au->{'id'});
-      $iv = base64_decode($au->{'iv'});
-      $annieusermeta = json_decode(decrypt($au->{'meta'},$iv));
-      if (isset($annieusermeta)
-       && array_key_exists('email', $annieusermeta)
-       && array_key_exists('firstname', $annieusermeta)
-      ) {
-
-        $annieuser->{'email'} = $annieusermeta->{'email'};
-        $annieuser->{'firstname'} = $annieusermeta->{'firstname'};
-
-        $sql = "
-        select supportneed.category
-        , coalesce(
-            (select value from $dbschm.codes where codeset='category' and code=supportneed.category)
-            ,jsonb_build_object('fi',supportneed.category,'sv',supportneed.category,'en',supportneed.category)
-          ) as categoryname
-        , sum(case when supportneed.status='1' then 1 else 0 end) as supportneedstatus1count
-        , sum(case when supportneed.status='2' then 1 else 0 end) as supportneedstatus2count
-        , sum(case when supportneed.status='100' then 1 else 0 end) as supportneedstatus100count
-        from $dbschm.supportneed
-        join $dbschm.contact on contact.id=supportneed.contact
-        join $dbschm.annieuser on annieuser.id=contact.annieuser
-        where supportneed.survey=:survey
-        and annieuser.id=:annieuser
-        group by supportneed.category
-        ";
-        $sth = $dbh->prepare($sql);
-        $sth->bindParam(':survey', $surveyrow->{'survey'});
-        $sth->bindParam(':annieuser', $annieuser->{'id'});
-        $sth->execute();
-        $supportneeds = json_decode(json_encode($sth->fetchAll(PDO::FETCH_ASSOC)));
-        if (isset($supportneeds) && count($supportneeds)>0) {
-
-          $sql = "select value from $dbschm.config where segment='mail' and field='surveyEndTeacher'";
-          $sth = $dbh->prepare($sql);
-          $sth->execute();
-          $res = $sth->fetch(PDO::FETCH_OBJ);
-          $mailcontent = isset($res->value) ? json_decode($res->value) : null;
-
-          // reuse lang from above!
-
-          if (isset($surveyrow) && isset($mailcontent) && isset($lang)) {
-            mailOnSurveyEndTeacher($surveyrow,$supportneeds,$annieuser,$mailcontent,$lang);
-          }
-        } // - supportneeds
-      } // - meta
-    }// - annieusers
-
     // AD-355 populate followup
     if (array_key_exists('followup', $surveyrow) && !empty($surveyrow->{'followup'})) {
       $ret = $anniedb->updateFollowupContacts($surveyrow->{'followup'}, 'Annie');
@@ -498,7 +652,7 @@ if (php_sapi_name() != "cli") {
       }
     }
     // actions
-    require "initiate.php";
+    require "initiate.php"; //provides: $messagetemplate
 
     // set survey in progress
     $sql = "
@@ -520,14 +674,11 @@ if (php_sapi_name() != "cli") {
     where (superuser = true or id in (
       select annieuser
       from $dbschm.annieusersurvey
-      left join jsonb_each(meta->'category') j on 1=1
       where survey = :survey
-      -- either coordinator or support provider (via category) is set
+      -- coordinator
       and meta is not null
       and (
         (meta->'coordinator' is not null and (meta->'coordinator')::boolean)
-        or
-        (meta->'category' is not null and j.value::boolean = true)
       )
     ))
     and coalesce(notifications,'DISABLED') != 'DISABLED'
@@ -553,117 +704,11 @@ if (php_sapi_name() != "cli") {
     $res = $sth->fetch(PDO::FETCH_OBJ);
     $mailcontent = isset($res->value) ? json_decode($res->value) : null;
 
-    $sql = "select value from $dbschm.config where segment='ui' and field='language'";
-    $sth = $dbh->prepare($sql);
-    $sth->execute();
-    $res = $sth->fetch(PDO::FETCH_OBJ);
-    $lang = isset($res->value) ? json_decode($res->value) : null;
-
     if (isset($surveyrow) && isset($destinations) && isset($annieusers) && count($annieusers)>0 && isset($mailcontent) && isset($lang)) {
-      mailOnInitiate($surveyrow,$destinations,$annieusers,$mailcontent,$lang);
+      mailOnSurveyStart($surveyrow,$destinations,$annieusers,$messagetemplate,$mailcontent,$lang);
     }
   }
 }
 // - "survey start"
-
-//: "daily digest"
-if ($runtime==$maildailydigestschedule)
-{
-  // mail to "annieuser is responsible for"
-  // nb! not for superusers
-  $sql = "
-  select annieuser.id, annieuser.meta, annieuser.iv
-  , count(distinct supportneed.contact) as supportneedcount
-  , count(distinct message.contact) as messagecount
-  from $dbschm.annieuser
-  join $dbschm.annieusersurvey aus on aus.annieuser = annieuser.id
-  left join $dbschm.supportneed on supportneed.survey = aus.survey
-    and (aus.meta->'category'->supportneed.category)::boolean
-    and supportneed.updated >= now() - interval '1 days'
-  left join $dbschm.message on message.survey = aus.survey
-    and message.contact in (--AD-315 query supportneed separately without updated restriction!
-        select su.contact
-        from $dbschm.supportneed su
-        where su.survey = aus.survey
-        and (aus.meta->'category'->su.category)::boolean
-    )
-    -- AD-315 include only support process messages
-    and message.context = 'SUPPORTPROCESS'
-    and message.updated >= now() - interval '1 days'
-  where annieuser.notifications = 'DAILYDIGEST'
-  and (supportneed.contact is not null or message.contact is not null)
-  group by annieuser.id, annieuser.meta, annieuser.iv
-
-  union
-
-  --AD-260 teachers
-  select annieuser.id, annieuser.meta, annieuser.iv
-  , count(distinct supportneed.contact) as supportneedcount
-  , count(distinct message.contact) as messagecount
-  from $dbschm.annieuser
-  join $dbschm.contact on contact.annieuser = annieuser.id
-  left join $dbschm.supportneed on supportneed.contact = contact.id
-    -- drop those belonging to support providers
-    and supportneed.id not in (
-      select sn.id
-      from $dbschm.supportneed sn
-      join $dbschm.annieusersurvey aus on aus.survey = sn.survey
-      where sn.contact = contact.id
-      and (aus.meta->'category'->sn.category)::boolean
-    )
-    and supportneed.updated >= now() - interval '1 days'
-  left join $dbschm.message on message.contact = contact.id
-    -- drop those belonging to support providers
-    and message.id not in (
-      select msg.id
-      from $dbschm.message msg
-      join $dbschm.supportneed sn on sn.contact = msg.contact and sn.survey = msg.survey
-      join $dbschm.annieusersurvey aus on aus.survey = sn.survey
-      where msg.contact = contact.id
-      and (aus.meta->'category'->sn.category)::boolean
-    )
-    -- AD-315 include only support process messages
-    and message.context = 'SUPPORTPROCESS'
-    and message.updated >= now() - interval '1 days'
-  where annieuser.notifications = 'DAILYDIGEST'
-  and (supportneed.contact is not null or message.contact is not null)
-  group by annieuser.id, annieuser.meta, annieuser.iv
-  ";
-  $sth = $dbh->prepare($sql);
-  $sth->execute();
-  $annieuserrows = json_decode(json_encode($sth->fetchAll(PDO::FETCH_ASSOC)));
-  $annieusers = array();
-  foreach ($annieuserrows as $au) {
-    $annieuser = (object)array(
-      "id" => $au->{'id'},
-      "supportneedcount" => $au->{'supportneedcount'},
-      "messagecount" => $au->{'messagecount'}
-    );
-    $iv = base64_decode($au->{'iv'});
-    $annieusermeta = json_decode(decrypt($au->{'meta'},$iv));
-    if (isset($annieusermeta) && array_key_exists('email', $annieusermeta)) {
-      $annieuser->{'email'} = $annieusermeta->{'email'};
-      array_push($annieusers, $annieuser);
-    }
-  }
-
-  printf(date("Y-m-d H:i:s")."%4s  "."daily digest $maildailydigestschedule".PHP_EOL, count($annieusers));
-
-  $sql = "select value from $dbschm.config where segment='mail' and field='dailyDigest'";
-  $sth = $dbh->prepare($sql);
-  $sth->execute();
-  $res = $sth->fetch(PDO::FETCH_OBJ);
-  $mailcontent = isset($res->value) ? json_decode($res->value) : null;
-
-  $sql = "select value from $dbschm.config where segment='ui' and field='language'";
-  $sth = $dbh->prepare($sql);
-  $sth->execute();
-  $res = $sth->fetch(PDO::FETCH_OBJ);
-  $lang = isset($res->value) ? json_decode($res->value) : null;
-
-  if (isset($annieusers) && count($annieusers)>0 && isset($mailcontent) && isset($lang)) {
-    mailOnDailyDigest($annieusers,$mailcontent,$lang);
-  }
-} // - "daily digest"
 
 ?>

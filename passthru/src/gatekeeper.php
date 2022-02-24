@@ -319,6 +319,7 @@ switch ($method) {
         $nextphase = null;
         $nextphaseisleaf = null;
         $nextmessage = null;
+        $firstmessage = null;
         $currentphaseconfig = null; //for checking next nextphase
 
         $possiblephases = array();
@@ -415,18 +416,16 @@ switch ($method) {
             // - get possible phases for current status
             foreach ($surveyconfigs[0] as $jk => $jv) {//nb! should be only one!
               if ("config" == $jk) { //must have
-                $possiblephases = getPossiblePhases($currentphase,json_decode($jv));
+                $flow = json_decode($jv);
+                $possiblephases = getPossiblePhases($currentphase,$flow);
+                $firstmessage = $flow->{'message'};
               }//-config
             }//-loop surveyconfig
 
             if (isset($text) && $text!=="") {
               // loop phases again but with evaluating with message received
-              foreach ($surveyconfigs[0] as $jk => $jv) {//nb! should be only one!
-                if ("config" == $jk) { //must have
-                  list ($nextmessage,$nextphase,$currentphaseconfig,$dosupportneed) = getPhaseAction($currentphase,$possiblephases,$text,json_decode($jv));
-                  $nextphaseisleaf = empty(getPossiblePhases($nextphase,$currentphaseconfig));
-                }//-config
-              }//-loop surveyconfig
+              list ($nextmessage,$nextphase,$currentphaseconfig,$dosupportneed) = getPhaseAction($currentphase,$possiblephases,$text,$flow);
+              $nextphaseisleaf = empty(getPossiblePhases($nextphase,$currentphaseconfig));
             }//-text
             else {//some sort of error
               error_log("ERROR: Gatekeeper: received a text message without text?!");

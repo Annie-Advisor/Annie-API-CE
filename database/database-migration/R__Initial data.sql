@@ -38,12 +38,6 @@ values
 ('Annie','watchdog','interval','15')
 ON CONFLICT DO NOTHING;
 
--- config/mail
-insert into config (updatedby,segment,field,value)
-values
-('Annie','mail','dailyDigestSchedule','"0800"')
-ON CONFLICT DO NOTHING;
-
 
 -- CODES
 insert into codes (codeset,code,value)
@@ -57,17 +51,14 @@ values
 -- supportNeedStatus
 ('supportNeedStatus','1','{"fi":"Uusi","en":"New"}'),
 ('supportNeedStatus','2','{"fi":"Käsittelyssä","en":"In progress"}'),
-('supportNeedStatus','100','{"fi":"Ratkaistu","en":"Resolved"}')
+('supportNeedStatus','100','{"fi":"Ratkaistu","en":"Resolved"}'),
+('supportNeedStatus','-1','{"en":"Error","es":"Error","fi":"Virhe","sv":"Fel"}')
 ON CONFLICT DO NOTHING;
 
 
 -- ANNIEUSER
 insert into annieuser (id,updatedby,createdby,superuser)
 values
-('devops@annieadvisor.com','Annie','Annie',false),
-('lauri.jokipii@annieadvisor.com','Annie','Annie',true),
-('joonas.pesonen@annieadvisor.com','Annie','Annie',true),
 ('miska.noponen@annieadvisor.com','Annie','Annie',true),
-('emilia.kuuskoski@annieadvisor.com','Annie','Annie',true),
-('topi.sarkiniemi@annieadvisor.com','Annie','Annie',true)
+('emilia.kuuskoski@annieadvisor.com','Annie','Annie',true)
 ON CONFLICT DO NOTHING;

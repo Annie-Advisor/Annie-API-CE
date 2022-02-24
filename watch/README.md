@@ -2,13 +2,7 @@
 
 ## Description
 
-Watchdog is a PHP command line script initially designed to be called via cron but the execution can be started from wherever, for example Jenkins. The design is currently such that with 5 minute precision the execution times can be tuned via database table `config` and its rows with columns `segment.field` matching and column `value` data as the chosen config value. E.g. `watchdog.interval` means basically SQL query:
-  ```
-  SELECT value
-  FROM config
-  WHERE segment='watchdog'
-  AND field='interval'
-  ```
+Watchdog is a PHP command line script initially designed to be called via cron but the execution can be started from wherever, for example Jenkins.
 
 Job description in jenkins gives context:
 
@@ -17,15 +11,18 @@ Job description in jenkins gives context:
 > 
 > NB! Watchdog is located at host (version handled elsewhere) but path and execution (args etc) are assumed to be same for all.
 
+where, for example, _watchdog.interval_ refers to database table `config` where column `segment` has value _'watchdog'_ and column `field` has value _'interval'_.
+
 ## Tasks
 
 Watchdog has tasks:
 
-- `close student initiated`
-- `kyselykierroksen päättäminen` or "end survey"
-- `muistutus` or "reminder"
-- `monimuistutus` or "n-reminder"
-- `kyselykierroksen aloitus` or "initiate survey"
+- `provider & teacher reminder 1`
+- `provider & teacher reminder 2`
+- `survey end`
+- `reminder`
+- `n-reminder`
+- `survey start`
 - `daily digest`
 
 The order of executing tasks is purposeful.
