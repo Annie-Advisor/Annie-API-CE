@@ -1,0 +1,5 @@
+insert into config (updatedby,segment,field,value)
+values
+('Annie','mail','surveyEndTeacher','{"subject":{"en":"{{surveyname}} ended, status of student support needs in your group","fi":"{{surveyname}} päättynyt, ryhmäsi tuen tarpeiden tilanne"},"header":{"en":"<html><body><p>Hi {{teachername}}!</p><p>{{surveyname}} has ended. Here is the current status of support needs reported by students in your group:</p>","fi":"<html><body><p>Moikka {{teachername}}!</p><p>{{surveyname}} on nyt päättynyt. Sinun ryhmäsi tuen tarpeiden tilanne tällä hetkellä:</p>"},"footer":{"en":"<p>You can find the support needs reported by students here:<br>https://{{hostname}}.annieadvisor.com</p><p>In case you have any questions, please reply :)</p><p>Kind regards,<br>Annie</p></body></html>","fi":"<p>Voit tarkastella opiskelijoiden ilmoittamia tuen tarpeita täällä:<br>https://{{hostname}}.annieadvisor.com</p><p>Jos sinulla on kysyttävää, voit vastata tähän viestiin :)</p><p>terveisin,<br>Annie</p></body></html>"}}')
+ON CONFLICT (segment,field)
+DO UPDATE SET value=EXCLUDED.value, updatedby=EXCLUDED.updatedby, updated=now();
