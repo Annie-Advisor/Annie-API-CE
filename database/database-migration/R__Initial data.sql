@@ -59,6 +59,5 @@ ON CONFLICT DO NOTHING;
 -- ANNIEUSER
 insert into annieuser (id,updatedby,createdby,superuser)
 values
-('miska.noponen@annieadvisor.com','Annie','Annie',true),
-('emilia.kuuskoski@annieadvisor.com','Annie','Annie',true)
+('annie@annieadvisor.com','Annie','Annie',true),
 ON CONFLICT DO NOTHING;
