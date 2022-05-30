@@ -52,8 +52,10 @@ if (count($request)>=1) {
 switch ($method) {
   case 'POST':
     $notifications = "DISABLED";
-    if (array_key_exists('notifications', $input)) {
-      $notifications = $input->{'notifications'};
+    if ($input) {
+      if (array_key_exists('notifications', $input)) {
+        $notifications = $input->{'notifications'};
+      }
     }
     $ret = $anniedb->updateAnnieuserNotifications($auth_uid,$notifications);
     if ($ret !== false) {

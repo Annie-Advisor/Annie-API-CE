@@ -1,6 +1,6 @@
 <?php
 /* gatekeeper.php
- * Copyright (c) 2021 Annie Advisor
+ * Copyright (c) 2021-2022 Annie Advisor
  * All rights reserved.
  * Contributors:
  *  Lauri Jokipii <lauri.jokipii@annieadvisor.com>
@@ -116,7 +116,7 @@ function getPhaseAction($currentphase,$possiblephases,$text,$flow) {
     if (strpos($fk,"branch") !== false && array_key_exists("condition", $fv)) {
       $phasecandidate_ = substr($fk,strlen("branch"));
       $pattern = "/".$fv->{'condition'}."/";
-      //todo: check $possiblephases
+      //to-do-ish: check $possiblephases
       if (in_array($currentphase, array("1","2"))) {
         if (preg_match($pattern, $text)) { //nb! improve me!
           $nextmessage = $fv->{'message'};
@@ -135,12 +135,12 @@ function getPhaseAction($currentphase,$possiblephases,$text,$flow) {
           if (strpos($ffk,"branch") !== false && array_key_exists("condition", $ffv)) {
             $phasecandidate__ = substr($ffk,strlen("branch"));
             $pattern = "/".$ffv->{'condition'}."/";
-            //todo: check $possiblephases
+            //to-do-ish: check $possiblephases
             if (preg_match($pattern, $text)) { //nb! improve me!
               $nextmessage = $ffv->{'message'};
               $nextphase = $phasecandidate__;
               $currentphaseconfig = $ffv;
-              //todo: next level?
+              //to-do-ish: next level?
               if (array_key_exists('supportneed', $ffv) && $ffv->{'supportneed'}) {
                 $dosupportneed = true;
               }
@@ -225,7 +225,7 @@ switch ($method) {
   case 'POST':
     if ($input) {
       //
-      // FLOW/ENGINE -> GATE + 3 directions
+      // FLOW/ENGINE -> GATE + many directions
       //
       /*
       Input comes from SMS Provider.
@@ -345,8 +345,8 @@ switch ($method) {
 
         //
         // Gatekeeper action: logic for different paths in order
-        // 1. ongoing contactsurvey on followup -> followupengine
-        // 2. ongoing contactsurvey -> surveyengine
+        // 1. ongoing contactsurvey -> surveyengine
+        // 2. ongoing followup -> followupengine
         // 3. supportneed exists -> supportprocess
         // 4. -> defaultbot
         //
@@ -355,6 +355,7 @@ switch ($method) {
         {
           $contacts = json_decode(json_encode($anniedb->selectContact($contactid)));
           $contact = $contacts[0]->{'contact'};
+          //not used (sql does its thing already): $contactoptout = $contacts[0]->{'optout'};
 
           // figure out survey from contact
           // for listing all latest data
@@ -363,15 +364,6 @@ switch ($method) {
             SELECT cs.updated
             , cs.survey
             , cs.status
-            ,coalesce((
-              select 1
-              from $dbschm.survey followup
-              join $dbschm.survey on survey.followup = followup.id
-                and survey.id <> followup.id --sanity check
-              where followup.id = cs.survey
-              and followup.status = 'IN PROGRESS'
-              and now() between followup.starttime and followup.endtime
-            ),0) as followup
             FROM $dbschm.contactsurvey cs
             WHERE cs.contact = :contact
             AND cs.status != '100' --not finished
@@ -390,13 +382,8 @@ switch ($method) {
           // ...test if there is such info...
           if (count($contactsurveys)>0) { // there is an ongoing contactsurvey
 
-            if ($contactsurveys[0]->{'followup'}==1) {
-              // -> Gatekeeper action: "follow up engine"
-              $gatekeeperaction = "FOLLOWUP";
-            } else {
-              // -> Gatekeeper action: "survey engine"
-              $gatekeeperaction = "SURVEY";
-            }
+            // -> Gatekeeper action: "survey engine"
+            $gatekeeperaction = "SURVEY";
 
             // can we proceed
             // - phase we are at (currentphase)
@@ -428,40 +415,127 @@ switch ($method) {
               $nextphaseisleaf = empty(getPossiblePhases($nextphase,$currentphaseconfig));
             }//-text
             else {//some sort of error
-              error_log("ERROR: Gatekeeper: received a text message without text?!");
+              error_log("WARNING: Gatekeeper: received a text message without text?!");
             }
 
           } else { // there is NO ongoing contactsurvey
 
-            // are there any (unresolved) supportneeds for contact
+            // is there followup ongoing?
             $sql = "
-              SELECT sn.updated
+              SELECT fu.updated
+              , fu.id
+              , fu.status
+              , fu.supportneed
+              , sn.followuptype
               , sn.survey
-              , sn.category
-              , sn.status
-              FROM $dbschm.supportneed sn
+              FROM $dbschm.followup fu
+              JOIN $dbschm.supportneed req ON req.id = fu.supportneed --request
+              JOIN $dbschm.supportneed sn ON sn.survey = req.survey AND sn.contact = req.contact --latest
               WHERE sn.contact = :contact
-              --AD-284: AND sn.status != '100' --not resolved
-              ORDER BY updated DESC LIMIT 1
+              AND fu.status != '100' --not finished
+              -- last one for supportneed (contact):
+              AND (fu.supportneed,fu.updated) in (
+                select supportneed,max(updated)
+                from $dbschm.followup
+                group by supportneed
+              )
+              -- supportneed followup is set
+              AND sn.followuptype IS NOT NULL
+              -- latest supportneed (w/ followuptype):
+              AND (sn.survey, sn.contact, sn.id) IN (
+                select survey, contact, max(id) as latestsupportneedid
+                from $dbschm.supportneed
+                where survey = sn.survey and contact = sn.contact
+                and followuptype is not null
+                group by survey, contact
+              )
+              ORDER BY fu.updated DESC LIMIT 1
             ";
             $sth = $dbh->prepare($sql);
             $sth->bindParam(':contact', $contactid);
             $sth->execute();
-            $opensupportneeds = json_decode(json_encode($sth->fetchAll(PDO::FETCH_ASSOC)));
-            if (count($opensupportneeds)>0) {
+            $followups = $sth->fetchAll(PDO::FETCH_ASSOC);
 
-              // -> Gatekeeper action: "support process"
-              $gatekeeperaction = "SUPPORTPROCESS";
-              $survey = $opensupportneeds[0]->{'survey'};//for mail
-              $category = $opensupportneeds[0]->{'category'};//for mail
-              $supportneedstatus = $opensupportneeds[0]->{'status'};//for checking and changing supportneed.status
+            if (count($followups)>0) { // there is an ongoing followup
 
-            } else {
+              // -> Gatekeeper action: "followup"
+              $gatekeeperaction = "FOLLOWUP";
+              $followup = $followups[0]['id'];
 
-              // -> Gatekeeper action: "default bot"
-              $gatekeeperaction = "DEFAULTBOT";
+              // can we proceed
+              // - phase we are at (currentphase)
+              $currentphase = $followups[0]['status'];
+              $requestid = $followups[0]['supportneed']; //nb! supportneedid as requestid
+              $followuptype = $followups[0]['followuptype'];
+              $survey = $followups[0]['survey'];
 
-            }
+              $followupconfig = json_decode($anniedb->selectConfig('followup','config')[0]['value']);
+              if (array_key_exists($followuptype, $followupconfig)) {
+                $flow = $followupconfig->{$followuptype};
+                $possiblephases = getPossiblePhases($currentphase,$flow);
+                $firstmessage = $flow->{'message'};
+              } else {
+                error_log("ERROR: Gatekeeper: did not find type=$followuptype from followup.config");
+              }
+              // ...and now we should know what we need
+              // - contact, supportneed (followup) and message (text)
+
+              if (!isset($flow) || empty($flow)) {
+                error_log("ERROR: Gatekeeper: did not get flow for followup (type=$followuptype)");
+              } else {
+                // do the flow magic; figure out:
+                // - which phases are possible (possiblephases)
+                // - what do we actually do (nextphase)
+
+                if (isset($text) && $text!=="") {
+                  // loop phases again but with evaluating with message received
+                  list ($nextmessage,$nextphase,$currentphaseconfig,$dosupportneed) = getPhaseAction($currentphase,$possiblephases,$text,$flow);
+                  $nextphaseisleaf = empty(getPossiblePhases($nextphase,$currentphaseconfig));
+                }//-text
+                else {//some sort of error
+                  error_log("WARNING: Gatekeeper: received a text message without text?!");
+                }
+              }
+
+            } else { // there is NO ongoing followup (or contactsurvey)
+
+              // are there any (unresolved) supportneeds for contact
+              $sql = "
+                SELECT sn.updated
+                , sn.survey
+                , sn.category
+                , sn.status
+                , sn.supporttype
+                , sn.followuptype
+                , sn.followupresult
+                FROM $dbschm.supportneed sn
+                WHERE sn.contact = :contact
+                --AD-284: AND sn.status != 'ACKED'
+                ORDER BY updated DESC LIMIT 1
+              ";
+              $sth = $dbh->prepare($sql);
+              $sth->bindParam(':contact', $contactid);
+              $sth->execute();
+              $opensupportneeds = json_decode(json_encode($sth->fetchAll(PDO::FETCH_ASSOC)));
+              if (count($opensupportneeds)>0) {
+
+                // -> Gatekeeper action: "support process"
+                $gatekeeperaction = "SUPPORTPROCESS";
+                $survey = $opensupportneeds[0]->{'survey'};//for mail
+                $category = $opensupportneeds[0]->{'category'};//for mail
+                $supportneedstatus = $opensupportneeds[0]->{'status'};//for checking and changing supportneed.status
+                $supporttype = $opensupportneeds[0]->{'supporttype'};//for updating supportneed
+                $followuptype = $opensupportneeds[0]->{'followuptype'};//for updating supportneed
+                $followupresult = $opensupportneeds[0]->{'followupresult'};//for updating supportneed
+
+              } else {
+
+                // -> Gatekeeper action: "default bot"
+                $gatekeeperaction = "DEFAULTBOT";
+
+              }
+
+            }//-followup (exists)
 
           }//-contactsurvey (exists)
 
@@ -487,10 +561,8 @@ switch ($method) {
           ))));
           //error_log("DEBUG: Gatekeeper: insert message(1): [not needed] id: ".$notneededmessageid);
           if ($notneededmessageid === FALSE) {
+            error_log("ERROR: Gatekeeper: insert message failed");
             $areyouokay = false;
-          }
-          if (!$areyouokay) {
-            error_log("WARNING: Gatekeeper: insert message(1) failed");
           }
           //...continue anyway
 
@@ -500,9 +572,27 @@ switch ($method) {
 
           //error_log("DEBUG: Gatekeeper: action chosen: ".$gatekeeperaction);
           switch ($gatekeeperaction) {
-            case 'FOLLOWUP':
             case 'SURVEY':
-              require 'my_app_specific_library_dir/surveyengine.php';
+              // handle CANCEL in survey context
+              $surveycancelcondition = '¤not#gonna%match.any&of*your"strings¤'; //weird default but okay
+              $surveycancelconfig = json_decode($anniedb->selectConfig('survey','cancel')[0]['value']);
+              if (array_key_exists('condition', $surveycancelconfig)) {
+                $surveycancelcondition = $surveycancelconfig->{'condition'};
+              }
+              $pattern = "/".$surveycancelcondition."/";
+              if (preg_match($pattern, $text)) {
+                // switch nextmessage based on different path
+                $nextmessage = null;
+                if (array_key_exists('message', $surveycancelconfig)) {
+                  $nextmessage = $surveycancelconfig->{'message'};
+                }
+                require 'my_app_specific_library_dir/surveycancel.php';
+              } else {
+                require 'my_app_specific_library_dir/surveyengine.php';
+              }
+              break;
+            case 'FOLLOWUP':
+              require 'my_app_specific_library_dir/followupengine.php';
               break;
             case 'SUPPORTPROCESS':
               require 'my_app_specific_library_dir/supportprocess.php';

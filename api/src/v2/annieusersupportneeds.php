@@ -8,7 +8,9 @@
  * Backend script between AnnieUI and Annie database.
  * Before database there is authentication check.
  *
- * NB! This supportneed API also gets survey and contact data. For efficiency.
+ * NB! API should probably be named contactsupportneeds.php
+ *     but it does get data based on currently calling user...
+ * NB! This supportneed API also gets survey data. For efficiency.
  */
 
 require_once 'my_app_specific_library_dir/settings.php';//->settings,db*
@@ -45,13 +47,13 @@ if (isset($_SERVER['PATH_INFO'])) {
 }
 //no $input = file_get_contents('php://input');
 
-$key = null;//nb! key is for contact.id
+$key = null;//nb! key is not used
 if (count($request)>=1) {
   $key = array_shift($request);
 }
 
 // get parameters as an array
-$getarr = array("category"=>[],"status"=>[],"survey"=>[],"userrole"=>[]);
+$getarr = array("category"=>[],"status"=>[],"survey"=>[],"supporttype"=>[],"followuptype"=>[],"followupresult"=>[]);
 // split on outer delimiter
 $pairs = explode('&', $_SERVER['QUERY_STRING']);
 // loop through each pair
@@ -79,8 +81,32 @@ foreach ($pairs as $i) {
 // create SQL based on HTTP method
 switch ($method) {
   case 'GET':
-    //nb! key is actually contact.id here
-    $ret = $anniedb->selectAnnieuserSupportneeds($key,$getarr);
+    // impersonate
+    $impersonate = null;
+    if (array_key_exists("impersonate", $getarr)) {
+      // value is coming in an array of arrays but only one (1st) is tried
+      if ($getarr["impersonate"][0]) {
+        // check that auth_uid has permission to do impersonation
+        $sth = $anniedb->getDbh()->prepare("SELECT 1 FROM $dbschm.usageright_superuser WHERE annieuser=:auth_uid");
+        $sth->bindParam(':auth_uid',$auth_uid);
+        if (!$sth->execute()) {
+          error_log("ERROR: DB: ".json_encode($sth->errorInfo()));
+          return false;
+        }
+        if ($sth->rowCount() > 0) {
+          error_log("INFO: annieusersupportneeds: auth_uid=$auth_uid impersonated as ".$getarr["impersonate"][0]);
+          $impersonate = $getarr["impersonate"][0];
+        } else {
+          error_log("INFO: annieusersupportneeds: auth_uid=$auth_uid TRIED TO IMPERSONATE AS ".$getarr["impersonate"][0]." BUT HAS NO RIGHT");
+          http_response_code(401);
+          echo json_encode(array("status"=>"UNAUTHORIZED"));
+          exit;
+        }
+      }
+    }
+
+    // nb! access right check done within SQL
+    $ret = $anniedb->selectAnnieuserSupportneeds($getarr,$auth_uid,$impersonate);
     if ($ret !== false) {
       http_response_code(200);
       echo json_encode($ret);

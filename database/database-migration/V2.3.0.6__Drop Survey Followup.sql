@@ -1,0 +1,2 @@
+ALTER TABLE survey DROP CONSTRAINT IF EXISTS survey_followup_fk;
+ALTER TABLE survey DROP COLUMN IF EXISTS followup;

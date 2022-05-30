@@ -21,9 +21,10 @@ class DB {
   //
 
   private $dbh;
-  private $dbhost, $dbport, $dbname, $dbschm, $dbuser, $dbpass;
+  private $dbschm;
   private $salt;
   private $cipher;
+  private $updatedby;
 
   //
   // CONSTRUCTORS & DESTRUCTORS
@@ -31,18 +32,17 @@ class DB {
 
   public function __construct($dbhost,$dbport,$dbname,$dbschm,$dbuser,$dbpass,$salt) {
     global $auth_uid;
-    $this->auth_uid = $auth_uid;
-    $this->dbhost = $dbhost;
-    $this->dbport = $dbport;
-    $this->dbname = $dbname;
+    if (!empty($auth_uid)) { // engine, watch, ...
+      $this->updatedby = $auth_uid;
+    } else {
+      $this->updatedby = "Arnie"; // w/ typo to show this error
+    }
     $this->dbschm = $dbschm;
-    $this->dbuser = $dbuser;
-    $this->dbpass = $dbpass;
     $this->salt   = $salt;
     $this->cipher = "aes-256-cbc";
 
     try {
-      $this->dbh = new PDO("pgsql: host=$this->dbhost; port=$this->dbport; dbname=$this->dbname", $this->dbuser, $this->dbpass);
+      $this->dbh = new PDO("pgsql: host=$dbhost; port=$dbport; dbname=$dbname", $dbuser, $dbpass);
     } catch (PDOException $e) {
       die("Something went wrong while connecting to database: " . $e->getMessage() );
     }
@@ -56,6 +56,10 @@ class DB {
   //
   // PRIVATES
   //
+
+  public function getDbh() {
+    return $this->dbh;
+  }
 
   public function encrypt($string,$iv) {
       $output = false;
@@ -83,11 +87,15 @@ class DB {
 
   public function selectAnnieuser($id) {
     $dbschm = $this->dbschm;
-    $sql = "SELECT id, meta, superuser, notifications, iv, validuntil FROM $dbschm.annieuser";
+    $sql = "
+      SELECT id, meta, superuser, notifications, iv, validuntil
+      FROM $dbschm.annieuser
+      WHERE 1=1
+      and coalesce(validuntil,'9999-09-09') > now()
+    ";
     if ($id) {
-      $sql.= " WHERE id = :id ";
+      $sql.= " AND id = :id ";
     }
-    // excecute SQL statement
     $sth = $this->dbh->prepare($sql);
     if ($id) {
       $sth->bindParam(':id', $id);
@@ -107,70 +115,134 @@ class DB {
     return $rows;
   }
 
-  public function insertAnnieuser($id,$input) {
+  public function insertAnnieuser($id,$inputs) {
     $dbschm = $this->dbschm;
-    if (!array_key_exists('id', $input) || $input->{'id'}=="") {
-      if (!$id) {
-        return false;
+
+    if (!is_array($inputs)) {
+      $inputs = array($inputs);
+    }
+
+    $ret = array();
+    foreach ($inputs as $input) {
+      $thisisok = true;//assume good
+
+      if (!array_key_exists('id', $input) || $input->{'id'}=="") {
+        if (!$id) {
+          $thisisok = false;
+        }
+        $input->{'id'} = $id; //for a true list of objects this is awkward, though!
       }
-      $input->{'id'} = $id;
-    }
-    // default if missing
-    if (!array_key_exists('meta', $input)) {
-      $input->{'meta'} = "";
-    }
-    if (!array_key_exists('superuser', $input)) {
-      $input->{'superuser'} = false;
-    }
-    if (!array_key_exists('notifications', $input)) {
-      $input->{'notifications'} = 'IMMEDIATE';
-    }
-    //iv
-    if (!array_key_exists('validuntil', $input)) {
-      $input->{'validuntil'} = null;
-    }
-    if (!array_key_exists('updated', $input)) {
-      $input->{'updated'} = "now()";
-    }
-    if (!array_key_exists('updatedby', $input)) {
-      $input->{'updatedby'} = $this->auth_uid;
-    }
-    if (!array_key_exists('created', $input)) {
-      $input->{'created'} = "now()";
-    }
-    if (!array_key_exists('createdby', $input)) {
-      $input->{'createdby'} = $this->auth_uid;
-    }
-    // encrypt:
-    $ivlen = openssl_cipher_iv_length($this->cipher);
-    $iv = openssl_random_pseudo_bytes($ivlen);
-    $enc_meta = $this->encrypt(json_encode($input->{'meta'}),$iv);
-    $enc_iv = base64_encode($iv);//store $iv for decryption later
-    //-encrypt
-    $sql = "
-      INSERT INTO $dbschm.annieuser (id,meta,superuser,notifications,iv,validuntil,updated,updatedby,created,createdby)
-      VALUES (:id,:meta,:superuser,:notifications,:iv,:validuntil,:updated,:updatedby,:created,:createdby)
-    ";
-    $sth = $this->dbh->prepare($sql);
-    $sth->bindParam(':id', $input->{'id'});
-    $sth->bindParam(':meta', $enc_meta);
-    $_tmp_superuser = json_encode($input->{'superuser'});
-    $sth->bindParam(':superuser', $_tmp_superuser);
-    $sth->bindParam(':notifications', $input->{'notifications'});
-    $sth->bindParam(':iv', $enc_iv);
-    $sth->bindParam(':validuntil', $input->{'validuntil'});
-    $sth->bindParam(':updated', $input->{'updated'});
-    $sth->bindParam(':updatedby', $input->{'updatedby'});
-    $sth->bindParam(':created', $input->{'created'});
-    $sth->bindParam(':createdby', $input->{'createdby'});
-    if (!$sth->execute()) {
-      error_log("ERROR: DB: ".json_encode($sth->errorInfo()));
-      return false;
-    }
-    if ($sth->rowCount() < 1) return false;
-    return $input->{'id'}; //nb! return the ID of inserted row
+      // default if missing
+      if (!array_key_exists('meta', $input)) {
+        $input->{'meta'} = "";
+      }
+      if (!array_key_exists('superuser', $input)) {
+        $input->{'superuser'} = false;
+      }
+      if (!array_key_exists('notifications', $input)) {
+        $input->{'notifications'} = 'IMMEDIATE';
+      }
+      //iv
+      if (!array_key_exists('validuntil', $input)) {
+        $input->{'validuntil'} = null;
+      }
+      if (!array_key_exists('updated', $input)) {
+        $input->{'updated'} = "now()";
+      }
+      if (!array_key_exists('updatedby', $input)) {
+        $input->{'updatedby'} = $this->updatedby;
+      }
+      if (!array_key_exists('created', $input)) {
+        $input->{'created'} = "now()";
+      }
+      if (!array_key_exists('createdby', $input)) {
+        $input->{'createdby'} = $this->updatedby;
+      }
+
+      if ($thisisok) {
+        // add business key here to identify object
+        $retobj = array(
+          "id" => $input->{'id'}
+        );
+        // check if ID (userid) exists already and update instead
+        $sql = "
+          SELECT id
+          FROM $dbschm.annieuser
+          WHERE id=:annieuser
+        ";
+        $sth = $this->dbh->prepare($sql);
+        $sth->bindParam(':annieuser', $input->{'id'});
+        $sth->execute();
+        if ($sth->rowCount()>0) {
+          $rows = $sth->fetchAll(PDO::FETCH_ASSOC);
+          foreach ($rows as $rownum => $row) {
+            if (array_key_exists('id', $row)) {
+              $rowret = $this->updateAnnieuser($row['id'],$input);
+              if ($rowret === false) {
+                $thisisok = false;
+                array_push($ret,array(
+                  "object" => $retobj,
+                  "operation" => "UPDATE",
+                  "status" => "FAILED"
+                ));
+              } else {
+                array_push($ret,array(
+                  "object" => $retobj,
+                  "operation" => "UPDATE",
+                  "status" => "OK"
+                ));
+              }
+            }
+          }
+        } else { //did not exist yet, resume normal action...
+
+          // encrypt:
+          $ivlen = openssl_cipher_iv_length($this->cipher);
+          $iv = openssl_random_pseudo_bytes($ivlen);
+          $enc_meta = $this->encrypt(json_encode($input->{'meta'}),$iv);
+          $enc_iv = base64_encode($iv);//store $iv for decryption later
+          //-encrypt
+          $sql = "
+            INSERT INTO $dbschm.annieuser (id,meta,superuser,notifications,iv,validuntil,updated,updatedby,created,createdby)
+            VALUES (:id,:meta,:superuser,:notifications,:iv,:validuntil,:updated,:updatedby,:created,:createdby)
+          ";
+          $sth = $this->dbh->prepare($sql);
+          $sth->bindParam(':id', $input->{'id'});
+          $sth->bindParam(':meta', $enc_meta);
+          $_tmp_superuser = json_encode($input->{'superuser'});
+          $sth->bindParam(':superuser', $_tmp_superuser);
+          $sth->bindParam(':notifications', $input->{'notifications'});
+          $sth->bindParam(':iv', $enc_iv);
+          $sth->bindParam(':validuntil', $input->{'validuntil'});
+          $sth->bindParam(':updated', $input->{'updated'});
+          $sth->bindParam(':updatedby', $input->{'updatedby'});
+          $sth->bindParam(':created', $input->{'created'});
+          $sth->bindParam(':createdby', $input->{'createdby'});
+          if (!$sth->execute()) {
+            error_log("ERROR: DB: ".json_encode($sth->errorInfo()));
+            $thisisok = false;
+          }
+          if ($sth->rowCount() < 1) {
+            $thisisok = false;
+            array_push($ret,array(
+              "object" => $retobj,
+              "operation" => "INSERT",
+              "status" => "FAILED"
+            ));
+          } else {
+            array_push($ret,array(
+              "object" => $retobj,
+              "operation" => "INSERT",
+              "status" => "OK"
+            ));
+          }
+        }
+      }//-thisisok for input
+    }//-foreach inputs
+    return $ret;
   }
 
+  //nb! not in direct API use
   public function updateAnnieuser($id,$input) {
     $dbschm = $this->dbschm;
     // default if missing
@@ -191,7 +263,7 @@ class DB {
       $input->{'updated'} = "now()";
     }
     if (!array_key_exists('updatedby', $input)) {
-      $input->{'updatedby'} = $this->auth_uid;
+      $input->{'updatedby'} = $this->updatedby;
     }
     // encrypt:
     $ivlen = openssl_cipher_iv_length($this->cipher);
@@ -226,7 +298,7 @@ class DB {
   public function updateAnnieuserNotifications($id,$notifications) {
     $dbschm = $this->dbschm;
     $updated = "now()";
-    $updatedby = $this->auth_uid;
+    $updatedby = $this->updatedby;
     $sql = "
       UPDATE $dbschm.annieuser
       SET notifications=:notifications, updated=:updated, updatedby=:updatedby
@@ -250,7 +322,10 @@ class DB {
     if (!$id) {
       return false;
     }
-    $sql = "DELETE FROM $dbschm.annieuser WHERE id = :id";
+    $sql = "
+      DELETE FROM $dbschm.annieuser
+      WHERE id = :id
+    ";
     $sth = $this->dbh->prepare($sql);
     $sth->bindParam(':id', $id);
     if (!$sth->execute()) {
@@ -261,10 +336,18 @@ class DB {
     return true;
   }
 
-  public function selectAnnieusersurvey($id,$getarr) {
+  public function selectAnnieusersurvey($id,$getarr,$auth_user=null) {
     $dbschm = $this->dbschm;
 
-    $sql = "SELECT id, annieuser, survey, meta FROM $dbschm.annieusersurvey WHERE 1=1";
+    $sql = "
+      SELECT id, annieuser, survey, meta
+      FROM $dbschm.annieusersurvey
+      WHERE 1=1
+      and(1=0
+        or (?) in (select annieuser from $dbschm.usageright_superuser)
+        or (?,survey) in (select annieuser,survey from $dbschm.usageright_coordinator)
+      )
+    ";
     // normal (intended) id argument for max one value (.../api.php/1)
     if ($id) $sql.= " AND id = ? ";
 
@@ -275,11 +358,10 @@ class DB {
     $in_id = implode(',', array_fill(0, count($getarr["id"]), '?'));
     if ($in_id)  $sql.= " AND id in ($in_id)";
 
-    // excecute SQL statement
     $sth = $this->dbh->prepare($sql);
     // bind parameters/values for both queries (length of array matters)
     // first "key" then the rest from specialized array(s) for each '?'
-    $sqlparams = [];
+    $sqlparams = [$auth_user,$auth_user];
     if ($id) {
       $sqlparams = array_merge($sqlparams,[$id]);
     }
@@ -295,7 +377,7 @@ class DB {
     return $rows;
   }
 
-  public function insertAnnieusersurvey($inputs) { // NB! wishes for an array! nb! no id, generated!
+  public function insertAnnieusersurvey($inputs,$auth_user=null) { // NB! wishes for an array! nb! no id, generated!
     $dbschm = $this->dbschm;
 
     if (!is_array($inputs)) {
@@ -320,7 +402,7 @@ class DB {
         $input->{'updated'} = "now()";
       }
       if (!array_key_exists('updatedby', $input)) {
-        $input->{'updatedby'} = $this->auth_uid;
+        $input->{'updatedby'} = $this->updatedby;
       }
 
       if ($thisisok) {
@@ -330,7 +412,11 @@ class DB {
           "survey" => $input->{'survey'}
         );
         // check if ID (or annieuser+survey) exists already and update instead
-        $sql = "SELECT id FROM $dbschm.annieusersurvey WHERE annieuser=:annieuser AND survey=:survey";
+        $sql = "
+          SELECT id
+          FROM $dbschm.annieusersurvey
+          WHERE annieuser=:annieuser AND survey=:survey
+        ";
         $sth = $this->dbh->prepare($sql);
         $sth->bindParam(':annieuser', $input->{'annieuser'});
         $sth->bindParam(':survey', $input->{'survey'});
@@ -339,7 +425,7 @@ class DB {
           $rows = $sth->fetchAll(PDO::FETCH_ASSOC);
           foreach ($rows as $rownum => $row) {
             if (array_key_exists('id', $row)) {
-              $rowret = $this->updateAnnieusersurvey($row['id'],$input);
+              $rowret = $this->updateAnnieusersurvey($row['id'],$input,$auth_user);
               if ($rowret === false) {
                 $thisisok = false;
                 array_push($ret,array(
@@ -391,7 +477,7 @@ class DB {
     return $ret;
   }
 
-  public function updateAnnieusersurvey($id,$input) {
+  public function updateAnnieusersurvey($id,$input,$auth_user=null) {
     $dbschm = $this->dbschm;
     // to-do-ish: if not given don't update, now go with all-at-once method
     if (!array_key_exists('meta', $input)) {
@@ -408,12 +494,16 @@ class DB {
       $input->{'updated'} = "now()";
     }
     if (!array_key_exists('updatedby', $input)) {
-      $input->{'updatedby'} = $this->auth_uid;
+      $input->{'updatedby'} = $this->updatedby;
     }
     $sql = "
       UPDATE $dbschm.annieusersurvey
       SET annieuser=:annieuser, survey=:survey, meta=:meta, updated=:updated, updatedby=:updatedby
       WHERE id=:id
+      and(1=0
+        or (:auth_user) in (select annieuser from $dbschm.usageright_superuser)
+        or (:auth_user,survey) in (select annieuser,survey from $dbschm.usageright_coordinator)
+      )
     ";
     $sth = $this->dbh->prepare($sql);
     $sth->bindParam(':annieuser', $input->{'annieuser'});
@@ -423,6 +513,7 @@ class DB {
     $sth->bindParam(':updated', $input->{'updated'});
     $sth->bindParam(':updatedby', $input->{'updatedby'});
     $sth->bindParam(':id', $id);
+    $sth->bindParam(':auth_user', $auth_user);
     if (!$sth->execute()) {
       error_log("ERROR: DB: ".json_encode($sth->errorInfo()));
       return false;
@@ -436,7 +527,10 @@ class DB {
     if (!$id) {
       return false;
     }
-    $sql = "DELETE FROM $dbschm.annieusersurvey WHERE id = :id";
+    $sql = "
+      DELETE FROM $dbschm.annieusersurvey
+      WHERE id = :id
+    ";
     $sth = $this->dbh->prepare($sql);
     $sth->bindParam(':id', $id);
     if (!$sth->execute()) {
@@ -454,6 +548,8 @@ class DB {
     $sql = "
       SELECT jsonb_build_object(codeset, jsonb_object_agg(code,value)) as json
       FROM $dbschm.codes
+      WHERE 1=1
+      AND coalesce(validuntil,'9999-09-09') > now()
       GROUP BY codeset
     ";
     if (isset($codeset) && $codeset!="") {
@@ -461,6 +557,7 @@ class DB {
         SELECT jsonb_object_agg(code,value) as json
         FROM $dbschm.codes
         WHERE codeset = :codeset
+        AND coalesce(validuntil,'9999-09-09') > now()
       ";
       if (isset($code) && $code!="") {
         $sql = "
@@ -468,10 +565,11 @@ class DB {
           FROM $dbschm.codes
           WHERE codeset = :codeset
           AND code = :code
+          AND coalesce(validuntil,'9999-09-09') > now()
         ";
       }
     }
-    // prepare SQL statement
+
     $sth = $this->dbh->prepare($sql);
     if (isset($codeset) && $codeset!="") {
       $sth->bindParam(':codeset', $codeset);
@@ -479,7 +577,6 @@ class DB {
     if (isset($code) && $code!="") {
       $sth->bindParam(':code', $code);
     }
-    // excecute SQL statement
     $sth->execute();
     // modify for return
     $rows = $sth->fetchAll(PDO::FETCH_ASSOC);
@@ -520,7 +617,7 @@ class DB {
           $input->{'updated'} = "now()";;
         }
         if (!array_key_exists('updatedby', $input)) {
-          $input->{'updatedby'} = $this->auth_uid;
+          $input->{'updatedby'} = $this->updatedby;
         }
         // nb! validuntil is not really used but we maintain possible future
         if (!array_key_exists('validuntil', $input)) {
@@ -600,10 +697,9 @@ class DB {
     return $ret;
   }
 
-  // nb! not used directly via API (yet)
   public function updateCodes($input) {
     $dbschm = $this->dbschm;
-    // sanity
+
     if (!array_key_exists('codeset', $input) || $input->{'codeset'}=="") {
       return false;
     }
@@ -615,7 +711,7 @@ class DB {
       $input->{'updated'} = "now()";
     }
     if (!array_key_exists('updatedby', $input)) {
-      $input->{'updatedby'} = $this->auth_uid;
+      $input->{'updatedby'} = $this->updatedby;
     }
     // json
     $value = null;
@@ -645,7 +741,10 @@ class DB {
   public function deleteCodes($codeset,$code) {
     $dbschm = $this->dbschm;
     if (isset($codeset) && $codeset!="" && isset($code) && $code!="") {
-      $sql = "DELETE FROM $dbschm.codes WHERE codeset = :codeset AND code = :code";
+      $sql = "
+        DELETE FROM $dbschm.codes
+        WHERE codeset = :codeset AND code = :code
+      ";
       $sth = $this->dbh->prepare($sql);
       $sth->bindParam(':codeset', $codeset);
       $sth->bindParam(':code', $code);
@@ -659,17 +758,22 @@ class DB {
     return false;
   }
 
+  // nb! multiuse with API and engine, watch
   public function selectConfig($segment,$field) {
     $dbschm = $this->dbschm;
     // for listing all data
-    $sql = "SELECT id,segment,field,value FROM $dbschm.config WHERE 1=1 ";
+    $sql = "
+      SELECT id,segment,field,value
+      FROM $dbschm.config
+      WHERE 1=1
+    ";
     if ($segment) {
       $sql.= " AND segment = :segment ";
     }
     if ($field) {
       $sql.= " AND field = :field ";
     }
-    // excecute SQL statement
+
     $sth = $this->dbh->prepare($sql);
     if ($segment) {
       $sth->bindParam(':segment', $segment);
@@ -682,16 +786,39 @@ class DB {
   }
   // todo: insert, update, delete
 
-  public function selectContact($contact) {
+  // nb! multiuse with API and engine, watch
+  public function selectContact($contact,$auth_user=null) {
     $dbschm = $this->dbschm;
-    $sql = "SELECT id,contact,iv FROM $dbschm.contact ";
+    $sql = "
+      SELECT id,updated,updatedby,contact,iv,annieuser,optout
+      FROM $dbschm.contact
+      WHERE 1=1
+    ";
     if ($contact) {
-      $sql.= " WHERE id = :contact ";
+      $sql.= "
+      AND id = :contact
+      ";
     }
-    // excecute SQL statement
+    if ($auth_user) { // not for engine, watch
+      $sql.= "
+        and(1=0
+          or (:auth_user) in (select annieuser from $dbschm.usageright_superuser)
+          or (:auth_user) in (select annieuser from $dbschm.usageright_coordinator)
+          -- survey is NOT set but user still has access
+          or (:auth_user) in (select annieuser from $dbschm.usageright_provider)
+          or (
+            (:auth_user,contact.id) in (select annieuser,teacherfor from $dbschm.usageright_teacher)
+            --cant negate providers due to no category because of no supportneed via survey
+          )
+        )
+      ";
+    }
     $sth = $this->dbh->prepare($sql);
     if ($contact) {
       $sth->bindParam(':contact', $contact);
+    }
+    if ($auth_user) { // not for engine, watch
+      $sth->bindParam(':auth_user', $auth_user);
     }
     $sth->execute();
     // modify for return
@@ -711,27 +838,9 @@ class DB {
   // no plan to insert or update contact data from here
 
   // nb! see also selectContactContactsurveys
-  public function selectContactsurvey($contactsurvey) {
-    $dbschm = $this->dbschm;
-    $sql = "
-      SELECT id,updated,updatedby,contact,survey,status
-      FROM $dbschm.contactsurvey
-      WHERE 1=1
-    ";
-    if ($contactsurvey) {
-      $sql.= "
-      AND id = :contactsurvey
-      ";
-    }
-    // excecute SQL statement
-    $sth = $this->dbh->prepare($sql);
-    if ($contactsurvey) {
-      $sth->bindParam(':contactsurvey', $contactsurvey);
-    }
-    $sth->execute();
-    return $sth->fetchAll(PDO::FETCH_ASSOC);
-  }
+  // nb! no select for contactsurvey
 
+  // nb! multiuse with API and engine, watch
   public function insertContactsurvey($input) {
     $dbschm = $this->dbschm;
     // contact can not be missing
@@ -742,7 +851,7 @@ class DB {
       $input->{'updated'} = "now()";
     }
     if (!array_key_exists('updatedby', $input)) {
-      $input->{'updatedby'} = $this->auth_uid;
+      $input->{'updatedby'} = $this->updatedby;
     }
     // survey can not be missing
     if (!array_key_exists('survey', $input)) {
@@ -767,59 +876,43 @@ class DB {
     $sth->execute();
     return $this->dbh->lastInsertId();
   }
+  // nb! no update or delete for contactsurvey
 
-  // nb! no update for contactsurvey
-
-  public function deleteContactsurvey($contactsurvey) {
+  // nb! no select for followup
+  public function insertFollowup($input) {
     $dbschm = $this->dbschm;
-    if ($contactsurvey) {
-      $sql = "DELETE FROM $dbschm.contactsurvey WHERE id = :contactsurvey";
-      $sth = $this->dbh->prepare($sql);
-      $sth->bindParam(':contactsurvey', $contactsurvey);
-      if (!$sth->execute()) {
-        error_log("ERROR: DB: ".json_encode($sth->errorInfo()));
-        return false;
-      }
-      if ($sth->rowCount() < 1) return false;
-      return true;
+    // supportneed can not be missing
+    if (!array_key_exists('supportneed', $input)) {
+      return false;
     }
-    return false;
-  }
+    if (!array_key_exists('updated', $input)) {
+      $input->{'updated'} = "now()";
+    }
+    if (!array_key_exists('updatedby', $input)) {
+      $input->{'updatedby'} = $this->updatedby;
+    }
+    // status can not be missing
+    // to-do-ish: check status value?
+    if (!array_key_exists('status', $input)) {
+      return false;
+    }
 
-  // nb! see also selectContactMessages
-  public function selectMessage($message) {
-    $dbschm = $this->dbschm;
     $sql = "
-      SELECT id,updated,updatedby,contact,body,sender,survey,context,status,created,createdby,iv
-      FROM $dbschm.message
-      WHERE 1=1
+      INSERT INTO $dbschm.followup (updated,updatedby,supportneed,status)
+      VALUES (:updated,:updatedby,:supportneed,:status)
     ";
-    if ($message) {
-      $sql.= "AND id = :message ";
-    }
-    // excecute SQL statement
     $sth = $this->dbh->prepare($sql);
-    if ($message) {
-      $sth->bindParam(':message', $message);
-    }
+    $sth->bindParam(':updated', $input->{'updated'});
+    $sth->bindParam(':updatedby', $input->{'updatedby'});
+    $sth->bindParam(':supportneed', $input->{'supportneed'});
+    $sth->bindParam(':status', $input->{'status'});
     $sth->execute();
-    // modify for return
-    $rows = $sth->fetchAll(PDO::FETCH_ASSOC);
-    foreach ($rows as $rownum => &$row) { //nb! will modify data in loop hence "&"
-      $iv = null;
-      if (array_key_exists('iv', $row)) {
-        $iv = base64_decode($row['iv']);
-      }
-      if (array_key_exists('body', $row)) {
-        $row['body'] = $this->decrypt($row['body'],$iv);
-      }
-      if (array_key_exists('sender', $row)) {
-        $row['sender'] = $this->decrypt($row['sender'],$iv);
-      }
-    }
-    return $rows;
+    return $this->dbh->lastInsertId();
   }
+  // nb! no update or delete for followup
 
+  // nb! see selectContactMessages
+  // nb! multiuse with API and engine, watch
   public function insertMessage($input) {
     $dbschm = $this->dbschm;
     if (!array_key_exists('id', $input) || $input->{'id'}=="") {
@@ -840,13 +933,13 @@ class DB {
       $input->{'created'} = "now()";
     }
     if (!array_key_exists('createdby', $input)) {
-      $input->{'createdby'} = $this->auth_uid;
+      $input->{'createdby'} = $this->updatedby;
     }
     if (!array_key_exists('updated', $input)) {
       $input->{'updated'} = "now()";
     }
     if (!array_key_exists('updatedby', $input)) {
-      $input->{'updatedby'} = $this->auth_uid;
+      $input->{'updatedby'} = $this->updatedby;
     }
     if (!array_key_exists('body', $input)) {
       $input->{'body'} = "";
@@ -898,14 +991,15 @@ class DB {
     return $input->{'id'}; //nb! return the ID of inserted row
   }
 
-  // nb! updates only status!
+  // nb! multiuse with API and engine, watch
+  // updates only status!
   public function updateMessage($message,$input) {
     $dbschm = $this->dbschm;
     if (!array_key_exists('updated', $input)) {
       $input->{'updated'} = "now()";
     }
     if (!array_key_exists('updatedby', $input)) {
-      $input->{'updatedby'} = $this->auth_uid;
+      $input->{'updatedby'} = $this->updatedby;
     }
     $sql = "
       UPDATE $dbschm.message
@@ -920,117 +1014,214 @@ class DB {
     $sth->execute();
     return true;
   }
+  // nb! no delete for message
 
-  public function deleteMessage($message) {
-    $dbschm = $this->dbschm;
-    if (!$message) {
-      return false;
-    }
-    $sql = "DELETE FROM $dbschm.message WHERE id = :message";
-    $sth = $this->dbh->prepare($sql);
-    $sth->bindParam(':message', $message);
-    if (!$sth->execute()) {
-      error_log("ERROR: DB: ".json_encode($sth->errorInfo()));
-      return false;
-    }
-    if ($sth->rowCount() < 1) return false;
-    return true;
-  }
-
-  //nb! see also selectAnnieuserSupportneeds, and older selectSupportneedsPage and selectSupportneedHistory
-  public function selectSupportneed($supportneed) {
+  // nb! v1 API only
+  // nb! see also selectAnnieuserSupportneeds, and older selectSupportneedsPage and selectSupportneedHistory
+  public function selectSupportneed($supportneedid) {
     $dbschm = $this->dbschm;
     $sql = "
-      SELECT id,updated,updatedby,contact,category,status,survey,userrole
+      SELECT id,updated,updatedby,contact,category,status,survey,supporttype,followuptype
       FROM $dbschm.supportneed
       WHERE 1=1
     ";
-    if ($supportneed) {
+    if ($supportneedid) {
       $sql.= "AND id = :supportneed ";
     }
-    // excecute SQL statement
+
     $sth = $this->dbh->prepare($sql);
-    if ($supportneed) {
-      $sth->bindParam(':supportneed', $supportneed);
+    if ($supportneedid) {
+      $sth->bindParam(':supportneed', $supportneedid);
     }
     $sth->execute();
     return $sth->fetchAll(PDO::FETCH_ASSOC);
   }
 
-  // nb! we are moving toward one table solution with supportneed, here is the first step
+  // nb! multiuse with API and followupengine
   //     select entire history with given id marking latest (max id) as current=true
-  public function selectSupportneedHistory($supportneed) {
+  public function selectSupportneedHistory($supportneedid) {
     $dbschm = $this->dbschm;
     $sql = "
-      SELECT id,updated,updatedby,contact,category,status,survey,userrole
+      SELECT id
+      , updated
+      , updatedby
+      , contact
+      , category
+      , status
+      , survey
+      , supporttype
+      , followuptype
+      , followupresult
       , case
         when id = (
           select max(sn.id)
-          from $dbschm.supportneedhistory sn
-          where sn.contact = supportneedhistory.contact
-          and sn.survey = supportneedhistory.survey
+          from $dbschm.supportneed sn
+          where sn.contact = supportneed.contact
+          and sn.survey = supportneed.survey
         )
         then true
         else false
         end as current
-      FROM $dbschm.supportneedhistory
+      , case
+        when id = (
+          select max(sn.id)
+          from $dbschm.supportneed sn
+          where sn.contact = supportneed.contact
+          and sn.survey = supportneed.survey
+        )
+        then (
+          select fu.status
+          from $dbschm.followup fu
+          where fu.supportneed in (
+            select sn.id from $dbschm.supportneed sn
+            where sn.contact = supportneed.contact
+            and sn.survey = supportneed.survey
+          )
+          -- last one for supportneed (contact):
+          and (fu.supportneed,fu.updated) in (
+            select supportneed,max(updated)
+            from $dbschm.followup
+            group by supportneed
+          )
+          order by updated desc limit 1
+        )
+        else null
+        end as followupstatus
+      FROM $dbschm.supportneed
       WHERE 1=1
     ";
-    if ($supportneed) {
+    if ($supportneedid) {
       // match any point in history with business key "contact+survey"
       $sql.= "
       AND (contact,survey) IN (
         select sn.contact, sn.survey
-        from $dbschm.supportneedhistory sn
+        from $dbschm.supportneed sn
         where sn.id = :supportneed
       )
       ";
     }
-    // excecute SQL statement
+
     $sth = $this->dbh->prepare($sql);
-    if ($supportneed) {
-      $sth->bindParam(':supportneed', $supportneed);
+    if ($supportneedid) {
+      $sth->bindParam(':supportneed', $supportneedid);
     }
     $sth->execute();
     return $sth->fetchAll(PDO::FETCH_ASSOC);
   }
 
-  public function insertSupportneed($input) {
+  // nb! this is it's own kind of API for own kind of table(s)
+  // nb! multiuse with API and engine, landbot
+  public function insertSupportneed($input,$auth_user=null) {
     $dbschm = $this->dbschm;
+    $contactid = null;
+    $survey = null;
+    $category = null;
+    $status = null;
+    $supporttype = null;
+    $followuptype = null;
+    $followupresult = null;
+    // fetch previous data for supportneed (to keep)
+    if (array_key_exists('id', $input)) {
+      $earliersupportneedid = $input->{'id'};
+      unset($input->{'id'}); // just clean up
+      $supportneedhistory = $this->selectSupportneedHistory($earliersupportneedid);
+      foreach ($supportneedhistory as $sni => $supportneed) {
+        if ($supportneed['current'] === true) {
+          $contactid = $supportneed['contact'];
+          $survey = $supportneed['survey'];
+          $category = $supportneed['category'];
+          $status = $supportneed['status'];
+          $supporttype = $supportneed['supporttype'];
+          $followuptype = $supportneed['followuptype'];
+          $followupresult = $supportneed['followupresult'];
+          break;
+        }
+      }
+    }
+    if (!array_key_exists('contact', $input)) {
+      if (!isset($contactid)) {
+        return false;
+      } else {
+        $input->{'contact'} = $contactid;
+      }
+    }
+    if (!array_key_exists('survey', $input)) {
+      if (!isset($survey)) {
+        return false;
+      } else {
+        $input->{'survey'} = $survey;
+      }
+    }
+    if (!array_key_exists('category', $input)) {
+      if (!isset($category)) {
+        $input->{'category'} = "Z";//unknown
+      } else {
+        $input->{'category'} = $category;
+      }
+    }
+    if (!array_key_exists('status', $input)) {
+      if (!isset($status)) {
+        $input->{'status'} = "NEW";
+      } else {
+        $input->{'status'} = $status;
+      }
+    }
+    if (!array_key_exists('supporttype', $input)) {
+      if (!isset($supporttype)) {
+        $input->{'supporttype'} = null;
+      } else {
+        $input->{'supporttype'} = $supporttype;
+      }
+    }
+    if (!array_key_exists('followuptype', $input)) {
+      if (!isset($followuptype)) {
+        $input->{'followuptype'} = null;
+      } else {
+        $input->{'followuptype'} = $followuptype;
+      }
+    }
+    if (!array_key_exists('followupresult', $input)) {
+      if (!isset($followupresult)) {
+        $input->{'followupresult'} = null;
+      } else {
+        $input->{'followupresult'} = $followupresult;
+      }
+    }
     if (!array_key_exists('updated', $input)) {
       $input->{'updated'} = "now()";
     }
     if (!array_key_exists('updatedby', $input)) {
-      $input->{'updatedby'} = $this->auth_uid;
+      $input->{'updatedby'} = $this->updatedby;
     }
-    if (!array_key_exists('contact', $input)) {
-      return false;
-    }
-    if (!array_key_exists('category', $input)) {
-      $input->{'category'} = "Z";//unknown
-    }
-    if (!array_key_exists('status', $input)) {
-      $input->{'status'} = "1";//New
-    }
-    if (!array_key_exists('survey', $input)) {
-      return false;
-    }
-    if (!array_key_exists('userrole', $input)) {
-      $input->{'userrole'} = "";
+
+    // auth_user has access check
+    if ($auth_user) { // not for engine, watch (if used)
+      $sql = "
+        SELECT 1 WHERE (1=0
+          or (:auth_user) in (select annieuser from $dbschm.usageright_superuser)
+          or (:auth_user,:survey) in (select annieuser,survey from $dbschm.usageright_coordinator)
+          or (:auth_user,:survey,:category) in (select annieuser,survey,category from $dbschm.usageright_provider)
+          or (
+            (:auth_user,:contact) in (select annieuser,teacherfor from $dbschm.usageright_teacher)
+            and (:survey,:category) NOT in (select survey,category from $dbschm.usageright_provider)
+          )
+        )
+      ";
+      $sth = $this->dbh->prepare($sql);
+      $sth->execute(array(
+        ':auth_user' => $auth_user,
+        ':survey' => $input->{'survey'},
+        ':category' => $input->{'category'},
+        ':contact' => $input->{'contact'}
+      ));
+      if ($sth->rowCount() <= 0) {
+        return false;
+      }
     }
 
     $sql = "
-      DELETE FROM $dbschm.supportneed
-      WHERE contact = :contact AND survey = :survey
-    ";//NB! used to be per category and survey (and ofc contact)
-    $sth = $this->dbh->prepare($sql);
-    $sth->bindParam(':contact', $input->{'contact'});
-    $sth->bindParam(':survey', $input->{'survey'});
-    $sth->execute();
-
-    $sql = "
-      INSERT INTO $dbschm.supportneed (updated,updatedby,contact,category,status,survey,userrole)
-      VALUES (:updated,:updatedby,:contact,:category,:status,:survey,:userrole)
+      INSERT INTO $dbschm.supportneed (updated,updatedby,contact,category,status,survey,supporttype,followuptype,followupresult)
+      VALUES (:updated,:updatedby,:contact,:category,:status,:survey,:supporttype,:followuptype,:followupresult)
     ";
     $sth = $this->dbh->prepare($sql);
     //$sth->bindParam(1, $input->{'id'});
@@ -1040,81 +1231,18 @@ class DB {
     $sth->bindParam(':category', $input->{'category'});
     $sth->bindParam(':status', $input->{'status'});
     $sth->bindParam(':survey', $input->{'survey'});
-    $sth->bindParam(':userrole', $input->{'userrole'});
+    $sth->bindParam(':supporttype', $input->{'supporttype'});
+    $sth->bindParam(':followuptype', $input->{'followuptype'});
+    $sth->bindParam(':followupresult', $input->{'followupresult'});
     $sth->execute();
     $input->{'id'} = $this->dbh->lastInsertId(); //works without parameter as the id column is clear
 
-    $sql = "
-      INSERT INTO $dbschm.supportneedhistory (id,updated,updatedby,contact,category,status,survey,userrole)
-      VALUES (:supportneed,:updated,:updatedby,:contact,:category,:status,:survey,:userrole)
-    ";
-    $sth = $this->dbh->prepare($sql);
-    $sth->bindParam(':supportneed', $input->{'id'});
-    $sth->bindParam(':updated', $input->{'updated'});
-    $sth->bindParam(':updatedby', $input->{'updatedby'});
-    $sth->bindParam(':contact', $input->{'contact'});
-    $sth->bindParam(':category', $input->{'category'});
-    $sth->bindParam(':status', $input->{'status'});
-    $sth->bindParam(':survey', $input->{'survey'});
-    $sth->bindParam(':userrole', $input->{'userrole'});
-    $sth->execute();
     return $input->{'id'}; //nb! return the ID of inserted row
   }
+  //nb! no update for supportneed, just add new rows
+  //nb! no delete for supportneed (see survey archive for example)
 
-  //nb! no update for supportneed, for which we have supportneedhistory table
-
-  //TODO: rethink deletion of supportneed in version 2!
-  public function deleteSupportneed($supportneed) {
-    $dbschm = $this->dbschm;
-    if ($supportneed) {
-      $sql = "DELETE FROM $dbschm.supportneed WHERE id = :supportneed ";
-      $sth = $this->dbh->prepare($sql);
-      $sth->bindParam(':supportneed', $supportneed);
-      if (!$sth->execute()) {
-        error_log("ERROR: DB: ".json_encode($sth->errorInfo()));
-        return false;
-      }
-      if ($sth->rowCount() < 1) return false;
-      return true;
-    }
-    return false;
-  }
-
-  // nb! see also selectSupportneedSupportneedcomments
-  public function selectSupportneedcomment($supportneedcomment) {
-    $dbschm = $this->dbschm;
-
-    $sql = "
-      SELECT id,updated,updatedby,supportneed,body,iv
-      FROM $dbschm.supportneedcomment
-      WHERE 1=1
-    ";
-    if ($supportneedcomment) {
-      $sql.= "
-      AND id = :supportneedcomment
-    ";
-    }
-    // excecute SQL statement
-    $sth = $this->dbh->prepare($sql);
-
-    if ($supportneedcomment) {
-      $sth->bindParam(':supportneedcomment', $supportneedcomment);
-    }
-    $sth->execute();
-    // modify for return
-    $rows = $sth->fetchAll(PDO::FETCH_ASSOC);
-    foreach ($rows as $rownum => &$row) { //nb! will modify data in loop hence "&"
-      $iv = null;
-      if (array_key_exists('iv', $row)) {
-        $iv = base64_decode($row['iv']);
-      }
-      if (array_key_exists('body', $row)) {
-        $row['body'] = $this->decrypt($row['body'],$iv);
-      }
-    }
-    return $rows;
-  }
-
+  // nb! no direct select for supportneedcomment (see selectSupportneedSupportneedcomments)
   public function insertSupportneedcomment($input) {
     $dbschm = $this->dbschm;
     if ($input) {
@@ -1125,7 +1253,7 @@ class DB {
         $input->{'updated'} = "now()";
       }
       if (!array_key_exists('updatedby', $input)) {
-        $input->{'updatedby'} = $this->auth_uid;
+        $input->{'updatedby'} = $this->updatedby;
       }
       if (!array_key_exists('body', $input)) {
         $input->{'body'} = "";
@@ -1154,29 +1282,12 @@ class DB {
     }
     return false;
   }
-
-  // nb! no update for supportneedcomment
-
-  public function deleteSupportneedcomment($supportneedcomment) {
-    $dbschm = $this->dbschm;
-    if ($supportneedcomment) {
-      $sql = "DELETE FROM $dbschm.supportneedcomment WHERE id = :supportneedcomment";
-      $sth = $this->dbh->prepare($sql);
-      $sth->bindParam(':supportneedcomment', $supportneedcomment);
-      if (!$sth->execute()) {
-        error_log("ERROR: DB: ".json_encode($sth->errorInfo()));
-        return false;
-      }
-      if ($sth->rowCount() < 1) return false;
-      return true;
-    }
-    return false;
-  }
+  // nb! no update or delete for supportneedcomment
 
   public function selectSurvey($survey,$getarr) {
     $dbschm = $this->dbschm;
     $sql = "
-      SELECT id,updated,updatedby,starttime,endtime,config,status,contacts,followup
+      SELECT id,updated,updatedby,starttime,endtime,config,status,contacts
       FROM $dbschm.survey
       WHERE 1=1
     ";
@@ -1185,7 +1296,6 @@ class DB {
       $sql.= " AND id = ? ";
     }
 
-    // sanity check via setup
     if (!isset($getarr)) {
       $getarr = array();
     }
@@ -1205,7 +1315,6 @@ class DB {
       $sql.= " AND coalesce(status,'') NOT IN ('ARCHIVED','DELETED') ";
     }
 
-    // excecute SQL statement
     $sth = $this->dbh->prepare($sql);
     // bind parameters/values for both queries (length of array matters)
     // first "key" then the rest from specialized array(s) for each '?'
@@ -1237,7 +1346,7 @@ class DB {
         $input->{'updated'} = "now()";
       }
       if (!array_key_exists('updatedby', $input)) {
-        $input->{'updatedby'} = $this->auth_uid;
+        $input->{'updatedby'} = $this->updatedby;
       }
       if (!array_key_exists('starttime', $input)) {
         return false;
@@ -1254,9 +1363,6 @@ class DB {
       if (!array_key_exists('contacts', $input)) {
         $input->{'contacts'} = array();
       }
-      if (!array_key_exists('followup', $input)) {
-        $input->{'followup'} = null;
-      }
 
       // does it exist already
       $sql = "SELECT 1 FROM $dbschm.survey WHERE id = :survey ";
@@ -1265,8 +1371,8 @@ class DB {
       $sth->execute();
       if ($sth->rowCount() == 0) {
         $sql = "
-          INSERT INTO $dbschm.survey (id,updated,updatedby,starttime,endtime,config,status,contacts,followup)
-          VALUES (:survey,:updated,:updatedby,:starttime,:endtime,:config,:status,:contacts,:followup)
+          INSERT INTO $dbschm.survey (id,updated,updatedby,starttime,endtime,config,status,contacts)
+          VALUES (:survey,:updated,:updatedby,:starttime,:endtime,:config,:status,:contacts)
         ";
         $sth = $this->dbh->prepare($sql);
         $sth->bindParam(':survey', $survey);
@@ -1279,16 +1385,14 @@ class DB {
         $sth->bindParam(':status', $input->{'status'});
         $_tmp_contacts = json_encode($input->{'contacts'});
         $sth->bindParam(':contacts', $_tmp_contacts);
-        $sth->bindParam(':followup', $input->{'followup'});
         $sth->execute();
         //echo $sth->rowCount();
         return $survey; // return given id back indicating success
       }
-      return $survey; //most likely existed already
+      return $survey; //most likely existed already, update?
     }
     return false;
   }
-
 
   public function updateSurvey($survey,$input) {
     $dbschm = $this->dbschm;
@@ -1297,7 +1401,7 @@ class DB {
         $input->{'updated'} = "now()";
       }
       if (!array_key_exists('updatedby', $input)) {
-        $input->{'updatedby'} = $this->auth_uid;
+        $input->{'updatedby'} = $this->updatedby;
       }
       if (!array_key_exists('starttime', $input)) {
         return false;
@@ -1306,25 +1410,20 @@ class DB {
         return false;
       }
       if (!array_key_exists('config', $input)) {
-        $input->{'config'} = null;
+        $input->{'config'} = "";
       }
       if (!array_key_exists('status', $input)) {
-        $input->{'status'} = null;
+        $input->{'status'} = "DRAFT";
       }
       if (!array_key_exists('contacts', $input)) {
-        $input->{'contacts'} = null;
-      }
-      if (!array_key_exists('followup', $input)) {
-        $input->{'followup'} = null;
+        $input->{'contacts'} = array();
       }
 
-      // does it exist already
       $sql = "
         UPDATE $dbschm.survey
         SET updated=:updated, updatedby=:updatedby
         , starttime=:starttime, endtime=:endtime
         , config=:config, status=:status, contacts=:contacts
-        , followup=:followup
         WHERE id = :survey
       ";
       $sth = $this->dbh->prepare($sql);
@@ -1337,7 +1436,6 @@ class DB {
       $sth->bindParam(':status', $input->{'status'});
       $_tmp_contacts = json_encode($input->{'contacts'});
       $sth->bindParam(':contacts', $_tmp_contacts);
-      $sth->bindParam(':followup', $input->{'followup'});
       $sth->bindParam(':survey', $survey);
       $sth->execute();
       if ($sth->rowCount()===1) {
@@ -1367,17 +1465,23 @@ class DB {
   // ADDITIONAL / HELPING FUNCTIONS
   //
 
-  // FLOWENGINE / WATCH
+  // FLOWENGINE / WATCH / INDIRECT
 
+  // nb! multiuse with API and engine, watch, landbot
   public function selectContactId($phonenumber) {
     $dbschm = $this->dbschm;
-    // must fetch all since queried data is encrypted
-    // TODO: how to limit? - as first aid let's order by updated for a sooner probable hit
-    $sql = "SELECT id, contact, iv FROM $dbschm.contact ORDER BY updated DESC";
-    // excecute SQL statement
+    // must fetch all since data is encrypted
+    // TO-DO-ish: how to limit? - as first aid let's order by updated for a sooner probable hit
+    $sql = "
+      SELECT id, contact, iv, optout
+      FROM $dbschm.contact
+      WHERE 1=1
+      ORDER BY updated DESC
+    ";
+
     $sth = $this->dbh->prepare($sql);
     $sth->execute();
-    // for return
+
     $ret = array();
     $rows = $sth->fetchAll(PDO::FETCH_ASSOC);
     foreach ($rows as $rownum => $row) {
@@ -1393,7 +1497,8 @@ class DB {
             array_push($ret,array(
               "id" => $row["id"],
               "contact" => $contactdata,
-              "iv" => $row["iv"]
+              "iv" => $row["iv"],
+              "optout" => $row["optout"]
             ));
             break;
           }
@@ -1406,11 +1511,15 @@ class DB {
   public function selectSurveyConfig($survey) {
     $dbschm = $this->dbschm;
     // for listing all data
-    $sql = "SELECT id,config,starttime,endtime,status FROM $dbschm.survey WHERE 1=1 ";
+    $sql = "
+      SELECT id,config,starttime,endtime,status
+      FROM $dbschm.survey
+      WHERE 1=1
+    ";
     if ($survey) {
       $sql.= " AND id = :survey ";
     }
-    // excecute SQL statement
+
     $sth = $this->dbh->prepare($sql);
     if ($survey) {
       $sth->bindParam(':survey', $survey);
@@ -1419,98 +1528,34 @@ class DB {
     return $sth->fetchAll(PDO::FETCH_ASSOC);
   }
 
-  public function updateFollowupContacts($survey,$updatedby) {
-    $dbschm = $this->dbschm;
-    $ret = -1; // default error, arguments not ok
-    if (isset($survey) && $survey!="" && isset($updatedby) && $updatedby!="") {
-      $sql = "
-        WITH followupcontacts AS (
-            SELECT followup as followupid
-            , jsonb_agg(contactid) as new_contacts
-            FROM $dbschm.survey
-            CROSS JOIN jsonb_array_elements_text(contacts) as contactid
-            WHERE followup IS NOT NULL
-            AND followup = :survey
-            AND coalesce(contacts,'null') != 'null'
-            AND contactid IN (
-                select sn.contact
-                from $dbschm.supportneed sn
-                where sn.survey = survey.id
-            )
-            GROUP BY followup
-        )
-        UPDATE $dbschm.survey
-        SET contacts = new_contacts
-        , updated = now()
-        , updatedby = :updatedby
-        FROM followupcontacts
-        WHERE id = followupid
-      ";
-      $sth = $this->dbh->prepare($sql);
-      $sth->bindParam(':survey', $survey);
-      $sth->bindParam(':updatedby', $updatedby);
-      if (!$sth->execute()) {
-        error_log("ERROR: DB: ".json_encode($sth->errorInfo()));
-        $ret = -2;
-      }
-      if ($sth->rowCount() < 1) {
-        $ret = 1; // nothing done
-      }
-      $ret = 0; // okay
-    }
-    return $ret;
-  }
 
   // OTHER
 
+  // DEPRECATED
   public function selectContactContactsurveys($contact) {
     $dbschm = $this->dbschm;
     // for listing all latest data
     $sql = "
       SELECT id,updated,updatedby,contact,survey,status
       FROM $dbschm.contactsurvey
+      WHERE 1=1
     ";
-    if ($contact) {
-      $sql.= "
-      WHERE contact = :contact
-      -- take only one (the last one) for contact (NB! not used! see supportneed API)
+    //mandatory to limit per contact
+    $sql.= "
+      AND contact = :contact
+      -- take only one (the last one)
       ORDER BY updated DESC
       LIMIT 1
     ";
-    }
-    // excecute SQL statement
+
     $sth = $this->dbh->prepare($sql);
-    if ($contact) {
-      $sth->bindParam(':contact', $contact);
-    }
+    $sth->bindParam(':contact', $contact);
     $sth->execute();
     return $sth->fetchAll(PDO::FETCH_ASSOC);
   }
 
-  public function selectContactMessages($contact,$getarr) {
+  public function selectContactMessages($contact,$auth_user,$impersonate=null) {
     $dbschm = $this->dbschm;
-
-    // impersonate
-    $impersonate = null;
-    if (array_key_exists("impersonate", $getarr)) {
-      // value is coming in an array of arrays but only one (1st) is tried
-      if ($getarr["impersonate"][0]) {
-        // check that auth_uid has permission to do impersonation
-        $sth = $this->dbh->prepare("select 1 is_superuser from $dbschm.annieuser where id=:auth_uid and superuser");
-        $sth->bindParam(':auth_uid',$this->auth_uid);
-        if (!$sth->execute()) {
-          error_log("ERROR: DB: ".json_encode($sth->errorInfo()));
-          return false;
-        }
-        if ($sth->rowCount() > 0) {
-          $impersonate = $getarr["impersonate"][0];
-          error_log("INFO: lib/anniedb/selectContactMessages: auth_uid=$this->auth_uid impersonated as ".$getarr["impersonate"][0]);
-        } else {
-          error_log("INFO: lib/anniedb/selectContactMessages: auth_uid=$this->auth_uid TRIED TO IMPERSONATE AS ".$getarr["impersonate"][0]." BUT HAS NO RIGHT");
-        }
-      }
-    }
-    //error_log("DEBUG: anniedb: auth_uid=$this->auth_uid selectContactMessages: impersonate=".($impersonate?$impersonate:"no; using auth_uid"));
 
     $sql = "
       SELECT m.id,m.created as updated,m.updatedby,m.contact,m.body,m.sender,m.survey,m.iv
@@ -1522,20 +1567,20 @@ class DB {
         -- survey is set and user has access
         (m.contact,m.survey) IN (
           select sn.contact, sn.survey
-          from $dbschm.supportneedhistory sn
+          from $dbschm.supportneed sn
           where 1=1
           and sn.id = (
-            select max(supportneedhistory.id)
-            from $dbschm.supportneedhistory
-            where supportneedhistory.contact = sn.contact
-            and supportneedhistory.survey = sn.survey
+            select max(supportneed.id)
+            from $dbschm.supportneed
+            where supportneed.contact = sn.contact
+            and supportneed.survey = sn.survey
           )
           and(1=0
-            or (:auth_uid) in (select annieuser from $dbschm.usageright_superuser)
-            or (:auth_uid,sn.survey) in (select annieuser,survey from $dbschm.usageright_coordinator)
-            or (:auth_uid,sn.survey,sn.category) in (select annieuser,survey,category from $dbschm.usageright_provider)
+            or (:auth_user) in (select annieuser from $dbschm.usageright_superuser)
+            or (:auth_user,sn.survey) in (select annieuser,survey from $dbschm.usageright_coordinator)
+            or (:auth_user,sn.survey,sn.category) in (select annieuser,survey,category from $dbschm.usageright_provider)
             or (
-              (:auth_uid,sn.contact) in (select annieuser,teacherfor from $dbschm.usageright_teacher)
+              (:auth_user,sn.contact) in (select annieuser,teacherfor from $dbschm.usageright_teacher)
               and (sn.survey,sn.category) NOT in (select survey,category from $dbschm.usageright_provider)
             )
           )
@@ -1543,9 +1588,9 @@ class DB {
         -- survey is NOT set but user still has access
           m.survey is null
           and (1=0
-            or (:auth_uid) in (select annieuser from $dbschm.usageright_superuser)
+            or (:auth_user) in (select annieuser from $dbschm.usageright_superuser)
             or (
-              (:auth_uid,m.contact) in (select annieuser,teacherfor from $dbschm.usageright_teacher)
+              (:auth_user,m.contact) in (select annieuser,teacherfor from $dbschm.usageright_teacher)
               --cant negate providers due to no category because of no supportneed via survey
             )
           )
@@ -1555,14 +1600,14 @@ class DB {
     if ($contact) {
       $sql.= " AND m.contact = :contact ";
     }
-    // excecute SQL statement
+
     $sth = $this->dbh->prepare($sql);
 
     // impersonate: switch UID if...
     if ($impersonate) {
-      $sth->bindParam(':auth_uid',$impersonate);
+      $sth->bindParam(':auth_user',$impersonate);
     } else {
-      $sth->bindParam(':auth_uid',$this->auth_uid);
+      $sth->bindParam(':auth_user',$auth_user);
     }
     if ($contact) {
       $sth->bindParam(':contact', $contact);
@@ -1591,64 +1636,59 @@ class DB {
       SELECT count(*) contacts
       ,(select count(distinct sn.contact)
         from $dbschm.supportneed sn
-        where sn.status!='100'
+        where sn.status!='ACKED'
       ) contactswithissue
       FROM $dbschm.contact co
     ";
-    // prepare SQL statement
     $sth = $this->dbh->prepare($sql);
-    // excecute SQL statement
     $sth->execute();
     return $sth->fetchAll(PDO::FETCH_ASSOC);
   }
 
-  public function selectAnnieuserSupportneeds($contact,$getarr) {
+  public function selectAnnieuserSupportneeds($getarr,$auth_user,$impersonate=null) {
     $dbschm = $this->dbschm;
 
-    $in_category = implode(',', array_fill(0, count($getarr["category"]), '?'));
-    $in_status   = implode(',', array_fill(0, count($getarr["status"]), '?'));
-    $in_survey   = implode(',', array_fill(0, count($getarr["survey"]), '?'));
-    $in_userrole = implode(',', array_fill(0, count($getarr["userrole"]), '?'));
-    //error_log("inQueries: (".$in_category.") / (".$in_status.") / (".$in_survey.") / (".$in_userrole.")");
-    //error_log("inArrays length: ".count(array_merge($getarr["category"],$getarr["status"],$getarr["survey"],$getarr["userrole"])));
-
-    // impersonate
-    $impersonate = null;
-    if (array_key_exists("impersonate", $getarr)) {
-      // value is coming in an array of arrays but only one (1st) is tried
-      if ($getarr["impersonate"][0]) {
-        // check that auth_uid has permission to do impersonation
-        $sth = $this->dbh->prepare("select 1 is_superuser from $dbschm.annieuser where id=:auth_uid and superuser");
-        $sth->bindParam(':auth_uid',$this->auth_uid);
-        if (!$sth->execute()) {
-          error_log("ERROR: DB: ".json_encode($sth->errorInfo()));
-          return false;
-        }
-        if ($sth->rowCount() > 0) {
-          $impersonate = $getarr["impersonate"][0];
-          error_log("INFO: lib/anniedb/selectAnnieuserSupportneeds: auth_uid=$this->auth_uid impersonated as ".$getarr["impersonate"][0]);
-        } else {
-          error_log("INFO: lib/anniedb/selectAnnieuserSupportneeds: auth_uid=$this->auth_uid TRIED TO IMPERSONATE AS ".$getarr["impersonate"][0]." BUT HAS NO RIGHT");
-        }
-      }
-    }
-    //error_log("DEBUG: anniedb: auth_uid=$this->auth_uid selectAnnieuserSupportneeds: impersonate=".($impersonate?$impersonate:"no; using auth_uid"));
+    $in_category       = implode(',', array_fill(0, count($getarr["category"]), '?'));
+    $in_status         = implode(',', array_fill(0, count($getarr["status"]), '?'));
+    $in_survey         = implode(',', array_fill(0, count($getarr["survey"]), '?'));
+    $in_supporttype    = implode(',', array_fill(0, count($getarr["supporttype"]), '?'));
+    $in_followuptype   = implode(',', array_fill(0, count($getarr["followuptype"]), '?'));
+    $in_followupresult = implode(',', array_fill(0, count($getarr["followupresult"]), '?'));
+    //error_log("inQueries: (".$in_category.") / (".$in_status.") / (".$in_survey.")");
+    //error_log("inArrays length: ".count(array_merge($getarr["category"],$getarr["status"],$getarr["survey"])));
 
     // for listing all latest data, excluding archived survey data
     $sql = "
       SELECT sn.id
       , sn.updated, sn.updatedby
       , sn.contact, sn.category, sn.status, sn.survey
-      , sn.userrole
+      , sn.supporttype, sn.followuptype
+      , sn.followupresult
+      , (
+          select fu.status
+          from $dbschm.followup fu
+          where fu.supportneed in (
+            select id from $dbschm.supportneed
+            where contact = sn.contact
+            and survey = sn.survey
+          )
+          -- last one for supportneed (contact):
+          and (fu.supportneed,fu.updated) in (
+            select supportneed,max(updated)
+            from $dbschm.followup
+            group by supportneed
+          )
+          order by fu.updated desc limit 1
+        ) as followupstatus
       , su.starttime, su.endtime
-      FROM $dbschm.supportneedhistory sn
+      FROM $dbschm.supportneed sn
       JOIN $dbschm.survey su ON su.id = sn.survey
       WHERE 1=1
       AND sn.id = (
-        select max(supportneedhistory.id)
-        from $dbschm.supportneedhistory
-        where supportneedhistory.contact = sn.contact
-        and supportneedhistory.survey = sn.survey
+        select max(supportneed.id)
+        from $dbschm.supportneed
+        where supportneed.contact = sn.contact
+        and supportneed.survey = sn.survey
       )
       AND coalesce(su.status,'') NOT IN ('ARCHIVED','DELETED')
       AND(1=0
@@ -1661,13 +1701,13 @@ class DB {
         )
       )
     ";
-    if ($contact)      $sql.= " AND sn.contact = ?";
-    if ($in_category)  $sql.= " AND sn.category in ($in_category)";//part of list of strings
-    if ($in_status)    $sql.= " AND sn.status in ($in_status)";//part of list of strings
-    if ($in_survey)    $sql.= " AND sn.survey in ($in_survey)";//part of list of strings
-    if ($in_userrole)  $sql.= " AND sn.userrole in ($in_userrole)";//part of list of strings
+    if ($in_category)       $sql.= " AND sn.category in ($in_category)";//part of list of strings
+    if ($in_status)         $sql.= " AND sn.status in ($in_status)";//part of list of strings
+    if ($in_survey)         $sql.= " AND sn.survey in ($in_survey)";//part of list of strings
+    if ($in_supporttype)    $sql.= " AND sn.supporttype in ($in_supporttype)";//part of list of strings
+    if ($in_followuptype)   $sql.= " AND sn.followuptype in ($in_followuptype)";//part of list of strings
+    if ($in_followupresult) $sql.= " AND sn.followupresult in ($in_followupresult)";//part of list of strings
 
-    // excecute SQL statement
     $sth = $this->dbh->prepare($sql);
     // bind parameters/values for both queries (length of array matters)
     $sqlparams = [];
@@ -1675,61 +1715,45 @@ class DB {
     if ($impersonate) {
       $sqlparams = array_merge($sqlparams,[$impersonate,$impersonate,$impersonate,$impersonate]);
     } else {
-      $sqlparams = array_merge($sqlparams,[$this->auth_uid,$this->auth_uid,$this->auth_uid,$this->auth_uid]);
-    }
-    if ($contact) {
-      $sqlparams = array_merge($sqlparams,[$contact]);
+      $sqlparams = array_merge($sqlparams,[$auth_user,$auth_user,$auth_user,$auth_user]);
     }
     $sth->execute(array_merge(
       $sqlparams,
       $getarr["category"],$getarr["status"],$getarr["survey"],
-      $getarr["userrole"]
+      $getarr["supporttype"],$getarr["followuptype"],
+      $getarr["followupresult"]
     ));
     return $sth->fetchAll(PDO::FETCH_ASSOC);
   }
 
-  public function selectSupportneedsPage($contact,$history,$getarr) {
+  // DEPRECATED
+  public function selectSupportneedsPage($contact,$history,$getarr,$auth_user,$impersonate=null) {
     $dbschm = $this->dbschm;
 
-    $in_category = implode(',', array_fill(0, count($getarr["category"]), '?'));
-    $in_status   = implode(',', array_fill(0, count($getarr["status"]), '?'));
-    $in_survey   = implode(',', array_fill(0, count($getarr["survey"]), '?'));
-    $in_userrole = implode(',', array_fill(0, count($getarr["userrole"]), '?'));
-    //error_log("inQueries: (".$in_category.") / (".$in_status.") / (".$in_survey.") / (".$in_userrole.")");
-    //error_log("inArrays length: ".count(array_merge($getarr["category"],$getarr["status"],$getarr["survey"],$getarr["userrole"])));
+    $in_category     = implode(',', array_fill(0, count($getarr["category"]), '?'));
+    $in_status       = implode(',', array_fill(0, count($getarr["status"]), '?'));
+    $in_survey       = implode(',', array_fill(0, count($getarr["survey"]), '?'));
+    $in_supporttype  = implode(',', array_fill(0, count($getarr["supporttype"]), '?'));
+    $in_followuptype = implode(',', array_fill(0, count($getarr["followuptype"]), '?'));
+    //error_log("inQueries: (".$in_category.") / (".$in_status.") / (".$in_survey.")";
+    //error_log("inArrays length: ".count(array_merge($getarr["category"],$getarr["status"],$getarr["survey"])));
     
-    // impersonate
-    $impersonate = null;
-    if (array_key_exists("impersonate", $getarr)) {
-      // value is coming in an array of arrays but only one (1st) is tried
-      if ($getarr["impersonate"][0]) {
-        // check that auth_uid has permission to do impersonation
-        $sth = $this->dbh->prepare("select 1 is_superuser from $dbschm.annieuser where id=:auth_uid and superuser");
-        $sth->bindParam(':auth_uid',$this->auth_uid);
-        if (!$sth->execute()) {
-          error_log("ERROR: DB: ".json_encode($sth->errorInfo()));
-          return false;
-        }
-        if ($sth->rowCount() > 0) {
-          $impersonate = $getarr["impersonate"][0];
-          error_log("INFO: lib/anniedb/selectSupportneedsPage: auth_uid=$this->auth_uid impersonated as ".$getarr["impersonate"][0]);
-        } else {
-          error_log("INFO: lib/anniedb/selectSupportneedsPage: auth_uid=$this->auth_uid TRIED TO IMPERSONATE AS ".$getarr["impersonate"][0]." BUT HAS NO RIGHT");
-        }
-      }
-    }
-    //error_log("DEBUG: anniedb: auth_uid=$this->auth_uid selectSupportneedsPage: impersonate=".($impersonate?$impersonate:"no; using auth_uid"));
-
     // for listing all latest data
     $sql = "
       SELECT sn.id
       ,sn.updated,sn.updatedby
       ,sn.contact,sn.category,sn.status,sn.survey
-      ,sn.userrole
+      ,sn.supporttype,sn.followuptype
       ,su.starttime,su.endtime
       FROM $dbschm.supportneed sn
       JOIN $dbschm.survey su ON su.id=sn.survey
       WHERE 1=1
+      AND coalesce(su.status,'') NOT IN ('ARCHIVED','DELETED')
+      -- latest supportneed row (no history)
+      and sn.id = (
+        select max(id) from $dbschm.supportneed
+        where contact = sn.contact and survey = sn.survey
+      )
       AND(1=0
         or (?) in (select annieuser from $dbschm.usageright_superuser)
         or (?,sn.survey) in (select annieuser,survey from $dbschm.usageright_coordinator)
@@ -1740,21 +1764,22 @@ class DB {
         )
       )
     ";
-    if ($contact)      $sql.= " AND sn.contact = ?";
-    if ($in_category)  $sql.= " AND sn.category in ($in_category)";//part of list of strings
-    if ($in_status)    $sql.= " AND sn.status in ($in_status)";//part of list of strings
-    if ($in_survey)    $sql.= " AND sn.survey in ($in_survey)";//part of list of strings
-    if ($in_userrole)  $sql.= " AND sn.userrole in ($in_userrole)";//part of list of strings
+    if ($contact)         $sql.= " AND sn.contact = ?";
+    if ($in_category)     $sql.= " AND sn.category in ($in_category)";//part of list of strings
+    if ($in_status)       $sql.= " AND sn.status in ($in_status)";//part of list of strings
+    if ($in_survey)       $sql.= " AND sn.survey in ($in_survey)";//part of list of strings
+    if ($in_supporttype)  $sql.= " AND sn.supporttype in ($in_supporttype)";//part of list of strings
+    if ($in_followuptype) $sql.= " AND sn.followuptype in ($in_followuptype)";//part of list of strings
 
     if ($history) {
-      // take only history, since the last one is there also!
+      // take entire history
       $sql = "
         SELECT sn.id
         ,sn.updated,sn.updatedby
         ,sn.contact,sn.category,sn.status,sn.survey
-        ,sn.userrole
+        ,sn.supporttype,sn.followuptype
         ,su.starttime,su.endtime
-        FROM $dbschm.supportneedhistory sn
+        FROM $dbschm.supportneed sn
         JOIN $dbschm.survey su ON su.id=sn.survey
         WHERE 1=1
         AND(1=0
@@ -1769,7 +1794,7 @@ class DB {
         AND sn.contact = ?
       ";
     }
-    // excecute SQL statement
+
     $sth = $this->dbh->prepare($sql);
     // bind parameters/values for both queries (length of array matters)
     $sqlparams = [];
@@ -1777,7 +1802,7 @@ class DB {
     if ($impersonate) {
       $sqlparams = array_merge($sqlparams,[$impersonate,$impersonate,$impersonate,$impersonate]);
     } else {
-      $sqlparams = array_merge($sqlparams,[$this->auth_uid,$this->auth_uid,$this->auth_uid,$this->auth_uid]);
+      $sqlparams = array_merge($sqlparams,[$auth_user,$auth_user,$auth_user,$auth_user]);
     }
     if ($contact) {
       $sqlparams = array_merge($sqlparams,[$contact]);
@@ -1785,60 +1810,38 @@ class DB {
     $sth->execute(array_merge(
       $sqlparams,
       $getarr["category"],$getarr["status"],$getarr["survey"],
-      $getarr["userrole"]
+      $getarr["supporttype"],$getarr["followuptype"]
     ));
     return $sth->fetchAll(PDO::FETCH_ASSOC);
   }
 
-  public function selectSupportneedSupportneedcomments($supportneed,$getarr) {
+  public function selectSupportneedSupportneedcomments($supportneedid,$getarr,$auth_user,$impersonate=null) {
     $dbschm = $this->dbschm;
-
-    // impersonate
-    $impersonate = null;
-    if (array_key_exists("impersonate", $getarr)) {
-      // value is coming in an array of arrays but only one (1st) is tried
-      if ($getarr["impersonate"][0]) {
-        // check that auth_uid has permission to do impersonation
-        $sth = $this->dbh->prepare("select 1 is_superuser from $dbschm.annieuser where id=:auth_uid and superuser");
-        $sth->bindParam(':auth_uid',$this->auth_uid);
-        if (!$sth->execute()) {
-          error_log("ERROR: DB: ".json_encode($sth->errorInfo()));
-          return false;
-        }
-        if ($sth->rowCount() > 0) {
-          $impersonate = $getarr["impersonate"][0];
-          error_log("INFO: lib/anniedb/selectSupportneedSupportneedcomments: auth_uid=$this->auth_uid impersonated as ".$getarr["impersonate"][0]);
-        } else {
-          error_log("INFO: lib/anniedb/selectSupportneedSupportneedcomments: auth_uid=$this->auth_uid TRIED TO IMPERSONATE AS ".$getarr["impersonate"][0]." BUT HAS NO RIGHT");
-        }
-      }
-    }
-    //error_log("DEBUG: anniedb: auth_uid=$this->auth_uid selectSupportneedSupportneedcomments: impersonate=".($impersonate?$impersonate:"no; using auth_uid"));
 
     $sql = "
       SELECT id,updated,updatedby,supportneed,body,iv
       FROM $dbschm.supportneedcomment
       WHERE 1=1
-      -- user has access (to referenced supportneed[history])
+      -- user has access (to referenced supportneed)
       AND supportneed IN (
         select sn.id
-        from $dbschm.supportneedhistory sn
+        from $dbschm.supportneed sn
         where 1=0
-        or (:auth_uid) in (select annieuser from $dbschm.usageright_superuser)
-        or (:auth_uid,sn.survey) in (select annieuser,survey from $dbschm.usageright_coordinator)
-        or (:auth_uid,sn.survey,sn.category) in (select annieuser,survey,category from $dbschm.usageright_provider)
+        or (:auth_user) in (select annieuser from $dbschm.usageright_superuser)
+        or (:auth_user,sn.survey) in (select annieuser,survey from $dbschm.usageright_coordinator)
+        or (:auth_user,sn.survey,sn.category) in (select annieuser,survey,category from $dbschm.usageright_provider)
         or (
-          (:auth_uid,sn.contact) in (select annieuser,teacherfor from $dbschm.usageright_teacher)
+          (:auth_user,sn.contact) in (select annieuser,teacherfor from $dbschm.usageright_teacher)
           and (sn.survey,sn.category) NOT in (select survey,category from $dbschm.usageright_provider)
         )
       )
     ";
-    if ($supportneed) {
+    if ($supportneedid) {
       $sql.= "
       AND supportneed IN (
         select b.id --b has them all
-        from $dbschm.supportneedhistory a
-        left join $dbschm.supportneedhistory b
+        from $dbschm.supportneed a
+        left join $dbschm.supportneed b
           on b.contact=a.contact
           -- and b.category=a.category
           and b.survey=a.survey
@@ -1846,17 +1849,16 @@ class DB {
       )
     ";
     }
-    // excecute SQL statement
     $sth = $this->dbh->prepare($sql);
 
     // impersonate: switch UID if...
     if ($impersonate) {
-      $sth->bindParam(':auth_uid',$impersonate);
+      $sth->bindParam(':auth_user',$impersonate);
     } else {
-      $sth->bindParam(':auth_uid',$this->auth_uid);
+      $sth->bindParam(':auth_user',$auth_user);
     }
-    if ($supportneed) {
-      $sth->bindParam(':supportneed', $supportneed);
+    if ($supportneedid) {
+      $sth->bindParam(':supportneed', $supportneedid);
     }
     $sth->execute();
     // modify for return
@@ -1871,42 +1873,6 @@ class DB {
       }
     }
     return $rows;
-  }
-
-  // categoryname calculating for contact if they have a supportneed
-  public function originalSurveySupportneedCategoryNameLocalized($contactid,$survey) {
-    $dbschm = $this->dbschm;
-
-    $categorynamelocalized = "ERROR"; //fallback
-
-    $sql = "
-      SELECT category
-      FROM $dbschm.supportneed
-      JOIN $dbschm.survey originalsurvey ON originalsurvey.id = supportneed.survey
-      WHERE supportneed.contact = :contact
-      AND originalsurvey.followup = :survey
-    ";
-    $sth = $this->dbh->prepare($sql);
-    $sth->bindParam(':contact', $contactid);
-    $sth->bindParam(':survey', $survey);
-    $sth->execute();
-    $rows = $sth->fetchAll(PDO::FETCH_ASSOC);
-    foreach ($rows as $rownum => $row) { //nb! should be max one, but...
-      $category = "Z";//unknown for safety?
-      if (array_key_exists('category', $row)) {
-        $category = $row['category'];
-      }
-      $res = json_decode(json_encode($this->selectConfig('ui','language')))[0];
-      $lang = isset($res->value) ? json_decode($res->value) : null;
-      $categorynames = json_decode(json_encode($this->selectCodes('category',$category)));
-      if (is_array($categorynames) && count($categorynames)>0) {
-        $categorynamelocalized = $categorynames[0]->$lang;
-      } else {
-        $categorynamelocalized = $category; //default to code over fallback
-      }
-    }
-
-    return $categorynamelocalized;
   }
 
 }//class

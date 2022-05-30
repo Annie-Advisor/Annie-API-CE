@@ -104,7 +104,6 @@ if ($areyouokay && $destination && $messagetemplate) {
     // make message personalized
     // replace string placeholders, like "{{ firstname }}"
     // assume contactdata
-    $categorynamelocalized = $anniedb->originalSurveySupportneedCategoryNameLocalized($contactid,$survey);
 
     $replaceables = preg_split('/[^{]*(\{\{[^}]+\}\})[^{]*/', $message, -1, PREG_SPLIT_NO_EMPTY|PREG_SPLIT_DELIM_CAPTURE);
     $personalized = $message;
@@ -113,9 +112,6 @@ if ($areyouokay && $destination && $messagetemplate) {
         $replacekey = trim(strtolower(preg_replace('/\{\{\s*([^}]+)\s*\}\}/', '$1', $replaceable)));
         if (array_key_exists($replacekey, $contactdata)) {
           $personalized = str_replace($replaceable, $contactdata->{$replacekey}, $personalized);
-        }
-        if ($replaceable == "originalsurvey.supportneed.category.name") {
-          $personalized = str_replace($replaceable, $categorynamelocalized, $personalized);
         }
       }
     }

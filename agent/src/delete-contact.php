@@ -73,6 +73,7 @@ switch ($method) {
         select au.superuser
         from $dbschm.annieuser au
         where au.id = :annieuser
+        and coalesce(au.validuntil,'9999-09-09') > now()
       )
       ";
       $sth = $dbh->prepare($sql);
@@ -90,6 +91,7 @@ switch ($method) {
         select au.superuser
         from $dbschm.annieuser au
         where au.id = :annieuser
+        and coalesce(au.validuntil,'9999-09-09') > now()
       )
       ";
       $sth = $dbh->prepare($sql);
@@ -107,6 +109,7 @@ switch ($method) {
         select au.superuser
         from $dbschm.annieuser au
         where au.id = :annieuser
+        and coalesce(au.validuntil,'9999-09-09') > now()
       )
       ";
       $sth = $dbh->prepare($sql);
@@ -120,7 +123,7 @@ switch ($method) {
       FROM $dbschm.supportneedcomment
       WHERE supportneed IN (
         select id
-        from $dbschm.supportneedhistory
+        from $dbschm.supportneed
         where contact = :contact
       )
       -- access right for superuser
@@ -128,6 +131,7 @@ switch ($method) {
         select au.superuser
         from $dbschm.annieuser au
         where au.id = :annieuser
+        and coalesce(au.validuntil,'9999-09-09') > now()
       )
       ";
       $sth = $dbh->prepare($sql);
@@ -138,13 +142,14 @@ switch ($method) {
 
       $sql = "
       DELETE
-      FROM $dbschm.supportneedhistory
+      FROM $dbschm.supportneed
       WHERE contact = :contact
       -- access right for superuser
       and true = (
         select au.superuser
         from $dbschm.annieuser au
         where au.id = :annieuser
+        and coalesce(au.validuntil,'9999-09-09') > now()
       )
       ";
       $sth = $dbh->prepare($sql);
@@ -165,12 +170,13 @@ switch ($method) {
         select au.superuser
         from $dbschm.annieuser au
         where au.id = :annieuser
-      )
+        and coalesce(au.validuntil,'9999-09-09') > now()
+     )
       ";
       $sth = $dbh->prepare($sql);
       $sth->bindParam(':contact', $contactid);
       $sth->bindParam(':annieuser', $auth_uid);
-      // check success (todo: oddly just this last one)
+      // check success (to-do-ish: oddly just this last one)
       if ($sth->execute()) {
         $total_row_count += $sth->rowCount();
         http_response_code(200);

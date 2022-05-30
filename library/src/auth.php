@@ -13,9 +13,19 @@
  * Requires settings to be read in.
  */
 
+/*
 $valid_user = $settings['api']['user'];
 $valid_pass = $settings['api']['pass'];
 $valid_passwords = array($valid_user => $valid_pass);
+*/
+$valid_passwords = array();
+foreach ($settings['api'] as $apikey => $user) {
+  $apipass = null;
+  if (substr($apikey, 0, 4) === "user") {
+    $apipass = str_replace("user", "pass", $apikey);
+    $valid_passwords[$user] = $settings['api'][$apipass];
+  }
+}
 $valid_users = array_keys($valid_passwords);
 
 $validated = false;

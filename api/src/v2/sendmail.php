@@ -107,9 +107,9 @@ switch ($method) {
     break;
 }
 
-$clientname = "annie"; // default value might be wise to hit an existing mail address
-if (gethostname()) {
-  $clientname = explode(".",gethostname())[0];
+$clientname = $settings['my']['name'];
+if (empty($clientname)) {
+  $clientname = "annie"; // default value might be wise to hit an existing mail address
 }
 
 // TODO use authenticated user info? (fetch from db, not auth)

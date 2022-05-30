@@ -1,6 +1,6 @@
 <?php
 /* defaultbot.php
- * Copyright (c) 2019-2021 Annie Advisor
+ * Copyright (c) 2019-2022 Annie Advisor
  * All rights reserved.
  * Contributors:
  *  Lauri Jokipii <lauri.jokipii@annieadvisor.com>
@@ -26,8 +26,8 @@ $quriiri = new Quriiri_API\Sender($quriiriapikey,$quriiriapiuri);
 //
 
 /* variables expected:
-- $contactnumber
-- $messageid ???
+$contactnumber
+$messageid ???
 */
 
 //TODO: is messageid mandatory?

@@ -78,8 +78,34 @@ foreach ($pairs as $i) {
 // create SQL based on HTTP method
 switch ($method) {
   case 'GET':
-    //nb! key is actually contact.id here
-    $ret = $anniedb->selectContactMessages($key,$getarr);
+    // impersonate
+    $impersonate = null;
+    if (array_key_exists("impersonate", $getarr)) {
+      // value is coming in an array of arrays but only one (1st) is tried
+      if ($getarr["impersonate"][0]) {
+        // check that auth_uid has permission to do impersonation
+        $sth = $anniedb->getDbh()->prepare("SELECT 1 FROM $dbschm.usageright_superuser WHERE annieuser=:auth_uid");
+        $sth->bindParam(':auth_uid',$auth_uid);
+        if (!$sth->execute()) {
+          error_log("ERROR: DB: ".json_encode($sth->errorInfo()));
+          return false;
+        }
+        if ($sth->rowCount() > 0) {
+          error_log("INFO: contactmessages: auth_uid=$auth_uid impersonated as ".$getarr["impersonate"][0]);
+          $impersonate = $getarr["impersonate"][0];
+        } else {
+          error_log("INFO: contactmessages: auth_uid=$auth_uid TRIED TO IMPERSONATE AS ".$getarr["impersonate"][0]." BUT HAS NO RIGHT");
+          http_response_code(401);
+          echo json_encode(array("status"=>"UNAUTHORIZED"));
+          exit;
+        }
+      }
+    }
+
+    // nb! access right check done within SQL
+    // nb! key is actually contact.id here
+    // nb! getarr not needed (any more)
+    $ret = $anniedb->selectContactMessages($key,$auth_uid,$impersonate);
     if ($ret !== false) {
       http_response_code(200);
       echo json_encode($ret);

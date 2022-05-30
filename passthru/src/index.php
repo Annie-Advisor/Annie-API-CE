@@ -10,8 +10,8 @@
  * NB! Authorization done via lower level IP restriction!
  */
 
-require 'my_annie/settings.php';
-require 'my_annie/http_response_code.php';
+require 'my_app_specific_library_dir/settings.php';
+require 'my_app_specific_library_dir/http_response_code.php';
 
 $headers = array();
 $headers[]='Access-Control-Allow-Headers: Content-Type';
@@ -40,8 +40,8 @@ if (isset($_SERVER['PATH_INFO'])) {
 $input = json_decode(file_get_contents('php://input'));
 
 echo '{';
-echo '"hostname":"'.gethostname().'",';
-echo '"version":"'.file_get_contents("my_html/annieversion").'"';
+echo '"hostname":"'.$_SERVER['SERVER_NAME'].'",';
+echo '"version":"'.file_get_contents("my_app_specific_html_dir/annieversion").'"';
 echo '}';
 
 http_response_code(200);

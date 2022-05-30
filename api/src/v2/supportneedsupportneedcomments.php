@@ -78,14 +78,45 @@ foreach ($pairs as $i) {
 // create SQL based on HTTP method
 switch ($method) {
   case 'GET':
-    // nb! key is for supportneed
-    $ret = $anniedb->selectSupportneedSupportneedcomments($key,$getarr);
-    if ($ret !== false) {
-      http_response_code(200);
-      echo json_encode($ret);
-    } else {
+    // parameter is mandatory
+    if (empty($key)) {
       http_response_code(400);
-      echo json_encode(array("status"=>"FAILED"));
+      echo json_encode(array("status"=>"FAILED", "message"=>"key missing"));
+    } else {
+      // impersonate
+      $impersonate = null;
+      if (array_key_exists("impersonate", $getarr)) {
+        // value is coming in an array of arrays but only one (1st) is tried
+        if ($getarr["impersonate"][0]) {
+          // check that auth_uid has permission to do impersonation
+          $sth = $anniedb->getDbh()->prepare("select 1 is_superuser from $dbschm.annieuser where id=:auth_uid and superuser and coalesce(validuntil,'9999-09-09') > now()");
+          $sth->bindParam(':auth_uid',$auth_uid);
+          if (!$sth->execute()) {
+            error_log("ERROR: DB: ".json_encode($sth->errorInfo()));
+            return false;
+          }
+          if ($sth->rowCount() > 0) {
+            error_log("INFO: supportneedsupportneedcomments: auth_uid=$auth_uid impersonated as ".$getarr["impersonate"][0]);
+            $impersonate = $getarr["impersonate"][0];
+          } else {
+            error_log("INFO: supportneedsupportneedcomments: auth_uid=$auth_uid TRIED TO IMPERSONATE AS ".$getarr["impersonate"][0]." BUT HAS NO RIGHT");
+            http_response_code(401);
+            echo json_encode(array("status"=>"UNAUTHORIZED"));
+            exit;
+          }
+        }
+      }
+
+      // nb! access right check done within SQL
+      // nb! key is for supportneed
+      $ret = $anniedb->selectSupportneedSupportneedcomments($key,$getarr,$auth_uid,$impersonate);
+      if ($ret !== false) {
+        http_response_code(200);
+        echo json_encode($ret);
+      } else {
+        http_response_code(400);
+        echo json_encode(array("status"=>"FAILED"));
+      }
     }
     break;
   case 'POST':

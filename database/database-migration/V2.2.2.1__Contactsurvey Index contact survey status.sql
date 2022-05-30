@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS contactsurvey_contact_survey_status_idx ON contactsurvey (contact, survey, status) INCLUDE (updated);

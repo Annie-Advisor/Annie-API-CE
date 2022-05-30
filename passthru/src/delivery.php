@@ -78,7 +78,6 @@ switch ($method) {
     break;
   case 'POST':
     if ($input) {
-      //error_log("DEBUG: Delivery: input: ".json_encode($input));
       /* Quriiri example:
       {
         "sender":"+358450000001",
@@ -129,11 +128,8 @@ switch ($method) {
       if (!preg_match('/^[+].*/', $sender)) {
         $sender = "+".$sender;
       }
-
       //error_log("DEBUG: Delivery: (edit)destination: ".$destination);
       //error_log("DEBUG: Delivery: (edit)sender: ".$sender);
-
-      // do your thing....
 
       // direction of message (which is sender and which destination)
       // - search for destination from contacts
@@ -156,27 +152,24 @@ switch ($method) {
           $annienumber = $destination;
           $contactid = $contactids[0]->{'id'};
         } else {
+          //error_log("WARNING: Delivery: could not get contact for sender=$sender");
           $areyouokay = false;
-          //TODO: errors
           http_response_code(200); // OK
           // but no need to continue
           exit;
         }
       }
 
-      //error_log("DEBUG: Delivery: contactid: ".$contactid);
-
-      //
-      // actions
-      //
-
       // update status
-      //error_log("DEBUG: Delivery: update: batchid: ".$batchid);
       $areyouokay = $anniedb->updateMessage($batchid,json_decode(json_encode(array(
         "updated"=>$statustime,
         "updatedby"=>"Delivery",
         "status"=>$status
       ))));
+      if (!$areyouokay) {
+        error_log("ERROR: Delivery: update message failed");
+        $areyouokay = false;
+      }
 
       // no output needed or expected
       http_response_code(200); // OK

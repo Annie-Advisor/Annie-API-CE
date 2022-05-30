@@ -1,0 +1,2570 @@
+openapi: 3.0.0
+info:
+  title: Annie API
+  description: Application Programming Interface (API) to serve the needs of applications that need Annie database (Annie UI etc).
+  contact:
+    email: annie@annieadvisor.com
+  license:
+    name: CC BY-NC-SA 4.0
+    url: https://creativecommons.org/licenses/by-nc-sa/4.0/
+  version: 2.5.0
+servers:
+  # Added by API Auto Mocking Plugin
+  - description: SwaggerHub API Auto Mocking
+    url: https://virtserver.swaggerhub.com/annie-advisor/AnnieAPI
+
+tags:
+- name: active
+  description: All active endpoints
+- name: admin
+  description: Admin used endpoints
+- name: app
+  description: Annie User Interface used endpoints
+
+paths:
+
+  # v1
+
+  /annieuser.php/{id}:
+    parameters:
+    - name: id
+      in: path
+      description: Annieuser id
+      required: true
+      schema:
+        type: string
+    get:
+      deprecated: true
+      summary: Read annieuser
+      description: |
+        Read annieuser data.
+        If id is given result is data for matching annieuser.
+        If id is omitted result depends on currently logged in annieuser.
+      operationId: getAnnieuserById
+      responses:
+        "200":
+          description: OK. Results given
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/annieuser'
+        "400":
+          description: Unknown error
+        "401":
+          description: Unauthorized
+    delete:
+      deprecated: true
+      summary: Delete annieuser
+      description: |
+        Delete annieuser.
+      operationId: deleteAnnieuserById
+      parameters:
+      - name: id
+        in: path
+        description: Annieuser id
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK. Annieuser deleted
+        "400":
+          description: Invalid argument/input
+        "401":
+          description: Unauthorized
+        "409":
+          description: Data problem
+  /annieuser.php:
+    post:
+      deprecated: true
+      summary: Add or update one or many annieuser
+      description: |
+        Updates and/or inserts one or many annieusers.
+      operationId: postAnnieuser
+      responses:
+        "200":
+          description: OK. Items updated or inserted
+        "400":
+          description: Invalid argument/input or data problem
+        "401":
+          description: Unauthorized
+        "409":
+          description: Data problem in a batch
+      requestBody:
+        description: Annieuser JSON
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/annieuser'
+
+  /annieusersurvey.php/{id}:
+    parameters:
+    - name: id
+      in: path
+      description: Annieusersurvey id
+      required: true
+      schema:
+        type: string
+    get:
+      deprecated: true
+      summary: Read annieusersurvey
+      description: |
+        Get annieusersurvey data.
+      operationId: getAnnieusersurveyById
+      parameters:
+      - name: id
+        in: query
+        description: Annieusersurvey id
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+      - name: survey
+        in: query
+        description: Survey id
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/annieusersurvey'
+        "400":
+          description: Data problem
+        "401":
+          description: Unauthorized
+    put:
+      deprecated: true
+      summary: Update annieusersurvey
+      description: |
+        Update annieusersurvey data.
+      operationId: putAnnieusersurveyById
+      requestBody:
+        description: Annieusersurvey JSON
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/annieusersurvey'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Data problem
+        "401":
+          description: Unauthorized
+    
+  /annieusersurvey.php:
+    post:
+      deprecated: true
+      summary: Add or update one to many annieusersurveys
+      description: |
+        Updates and/or inserts one to many annieusersurveys.
+      operationId: postAnnieusersurvey
+      requestBody:
+        description: Annieusersurvey JSON
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/annieusersurvey'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid argument/input or data problem
+        "401":
+          description: Unauthorized
+        "409":
+          description: Data problem in a batch
+
+  /codes.php:
+    get:
+      deprecated: true
+      summary: Read codes
+      description: |
+        Read codes. Path arguments codeset and code are optional.
+      operationId: getCodes
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/codes'
+        "400":
+          description: Invalid argument or data problem
+        "401":
+          description: Unauthorized
+  /codes.php/{codeset}:
+    parameters:
+    - name: codeset
+      in: path
+      description: Codeset
+      required: true
+      schema:
+        type: string
+    get:
+      deprecated: true
+      summary: Read codeset
+      description: |
+        Read codeset from codes.
+      operationId: getCodesCodeset
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                    $ref: '#/components/schemas/codes'
+        "400":
+          description: Invalid argument or data problem
+        "401":
+          description: Unauthorized
+  /codes.php/{codeset}/{code}:
+    parameters:
+    - name: codeset
+      in: path
+      description: Codeset
+      required: true
+      schema:
+        type: string
+    - name: code
+      in: path
+      description: Code in codeset
+      required: true
+      schema:
+        type: string
+    get:
+      deprecated: true
+      summary: Read codeset code
+      description: |
+        Read codeset and code from codes.
+      operationId: getCodesCodesetCode
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/codes'
+        "400":
+          description: Invalid argument or data problem
+        "401":
+          description: Unauthorized
+
+  /contact.php:
+    get:
+      deprecated: true
+      summary: Read contacts
+      description: |
+        Read contacts.
+      operationId: getContact
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/contact'
+        "401":
+          description: Unauthorized
+  /contact.php/{id}:
+    parameters:
+    - name: id
+      in: path
+      description: Contact id
+      required: true
+      schema:
+        type: string
+    get:
+      deprecated: true
+      summary: Read contact
+      description: |
+        Read contact.
+      operationId: getContactById
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/contact'
+        "401":
+          description: Unauthorized
+
+  /supportneed.php:
+    get:
+      deprecated: true
+      summary: Read supportneeds
+      description: |
+        Read supportneeds.
+      operationId: getSupportneed
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/supportneed'
+        "400":
+          description: Invalid argument or data problem
+        "401":
+          description: Unauthorized
+    post:
+      deprecated: true
+      summary: Add supportneed
+      description: |
+        Insert supportneed.
+      operationId: postSupportneed
+      requestBody:
+        description: Supportneed JSON
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/supportneed'
+      responses:
+        "200":
+          description: OK. Item inserted
+        "400":
+          description: Invalid input or data problem
+        "401":
+          description: Unauthorized
+  /supportneed.php/{id}:
+    parameters:
+    - name: id
+      in: path
+      description: Supportneed id
+      required: true
+      schema:
+        type: string
+    get:
+      deprecated: true
+      summary: Read supportneed
+      description: |
+        Read supportneed.
+      operationId: getSupportneedById
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/supportneed'
+        "400":
+          description: Invalid argument or data problem
+        "401":
+          description: Unauthorized
+
+  /supportneedcomment.php:
+    post:
+      deprecated: true
+      summary: Add supportneedcomment
+      description: |
+        Insert supportneedcomment.
+      operationId: postSupportneedcomment
+      requestBody:
+        description: Supportneedcomment JSON
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/supportneedcomment'
+      responses:
+        "200":
+          description: OK. Item inserted
+        "400":
+          description: Invalid input or data problem
+
+  /survey.php:
+    get:
+      deprecated: true
+      summary: Read surveys
+      description: |
+        Read surveys.
+      operationId: getSurvey
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/survey'
+        "400":
+           description: Data problem
+  /survey.php/{id}:
+    parameters:
+    - name: id
+      in: path
+      description: Survey id
+      required: true
+      schema:
+        type: string
+    get:
+      deprecated: true
+      summary: Read survey
+      description: |
+        Read survey.
+      operationId: getSurveyById
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/survey'
+        "400":
+           description: Data problem
+    put:
+      deprecated: true
+      summary: Update survey
+      description: |
+        Update survey.
+      operationId: putSurveyById
+      requestBody:
+        description: Survey JSON
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/survey'
+      responses:
+        "200":
+          description: OK. Survey updated
+        "400":
+          description: Invalid input/argument or data problem
+        "401":
+          description: Unauthorized
+    post:
+      deprecated: true
+      summary: Add survey
+      description: |
+        Insert survey.
+      operationId: postSurveyById
+      requestBody:
+        description: Survey JSON
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/survey'
+      responses:
+        "200":
+          description: OK. Survey inserted
+        "400":
+          description: Invalid input/argument or data problem
+        "401":
+          description: Unauthorized
+
+  /contactcontactsurveys.php/{id}:
+    parameters:
+    - name: id
+      in: path
+      description: Contact id
+      required: true
+      schema:
+        type: string
+    get:
+      deprecated: true
+      summary: Read contactsurveys for contact
+      description: |
+        Read contactsurveys for contact.
+      operationId: getContactcontactsurveysById
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  #$ref: '#/components/schemas/contactsurvey'
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                      description: Contactsurvey id
+                    updated:
+                      type: string
+                      format: date-time
+                    updatedby:
+                      type: string
+                    contact:
+                      type: string
+                      description: Contact id
+                      example: "MJs4ysU0kay"
+                    survey:
+                      type: string
+                      description: Survey id
+                      example: "1694207654321"
+                    status:
+                      type: string
+                      # kinda iffy:
+                      enum: ["1","2","**","100"]
+                      example: "100"
+        "400":
+          description: Data problem
+        "401":
+          description: Unauthorized
+
+  /contactmessages.php:
+    get:
+      deprecated: true
+      summary: Read messages
+      description: |
+        Read messages.
+      operationId: getContactmessages
+      parameters:
+      - name: impersonate
+        in: query
+        schema:
+          type: string
+          description: Annieuser id
+          example: "annie@annieadvisor.com"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/message'
+        "400":
+          description: Invalid argument or data problem
+        "401":
+          description: Unauthorized
+  /contactmessages.php/{id}:
+    get:
+      deprecated: true
+      summary: Read contact messages
+      description: |
+        Read contact messages.
+      operationId: getContactmessagesById
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Contact id
+          example: "MJs4ysU0kay"
+      - name: impersonate
+        in: query
+        schema:
+          type: string
+          description: Annieuser id
+          example: "annie@annieadvisor.com"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/message'
+        "400":
+          description: Invalid argument or data problem
+        "401":
+          description: Unauthorized
+
+  /metadata.php:
+    get:
+      deprecated: true
+      summary: Read quick stats
+      description: |
+        Read quick statistics.
+      operationId: getMetadata
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contacts:
+                    type: integer
+                  contactswithissue:
+                    type: integer
+        "400":
+          description: Data problem
+
+  /sendsms.php:
+    post:
+      deprecated: true
+      summary: Send SMS
+      description: |
+        Send SMS.
+      operationId: postSendsms
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                to:
+                  type: string
+                  description: Phonenumber
+                body:
+                  type: string
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid input or data problem
+
+  /supportneedspage.php:
+    get:
+      deprecated: true
+      summary: Read supportneeds page
+      description: |
+        Read supportneeds page.
+      operationId: getSupportneedspage
+      parameters:
+      - name: impersonate
+        in: query
+        schema:
+          type: string
+      - name: category
+        in: query
+        schema:
+          type: array
+          items:
+            type: string
+      - name: status
+        in: query
+        schema:
+          type: array
+          items:
+            type: string
+      - name: survey
+        in: query
+        schema:
+          type: array
+          items:
+            type: string
+      - name: supporttype
+        in: query
+        schema:
+          type: array
+          items:
+            $ref: '#/components/schemas/supporttype'
+      - name: followuptype
+        in: query
+        schema:
+          type: array
+          items:
+            $ref: '#/components/schemas/followuptype'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  #$ref: '#/components/schemas/supportneed'
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                      description: Supportneed id
+                    updated:
+                      type: string
+                      format: date-time
+                      description: Supportneed updated
+                    updatedby:
+                      type: string
+                      description: Supportneed updated by
+                      example: "Annie User"
+                    contact:
+                      type: string
+                      description: Contact id
+                      example: "MJs4ysU0kay"
+                    category:
+                      type: string
+                      description: Category code
+                      example: "C3"
+                    status:
+                      $ref: '#/components/schemas/supportneedStatus'
+                    survey:
+                      type: string
+                      description: Survey id
+                      example: "1694207654321"
+                    supporttype:
+                      $ref: '#/components/schemas/supporttype'
+                    followuptype:
+                      $ref: '#/components/schemas/followuptype'
+                    starttime:
+                      type: string
+                      format: date-time
+                      description: Survey start time
+                    endtime:
+                      type: string
+                      format: date-time
+                      description: Survey end time
+        "400":
+          description: Data problem
+        "401":
+          description: Unauthorized
+
+  /supportneedsupportneedcomments.php/{id}:
+    get:
+      deprecated: true
+      summary: Read supportneedcomments of a supportneed
+      description: |
+        Get support need comments for given support need.
+      operationId: getSupportneedsupportneedcomments
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          description: Supportneed id
+          example: 1234
+      - name: impersonate
+        in: query
+        schema:
+          type: string
+          description: Annieuser id
+          example: "annie@annieadvisor.com"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/supportneedcomment'
+        "400":
+          description: Invalid argument or data problem
+        "401":
+          description: Unauthorized
+
+  # v2
+
+  /v2/annieuser.php/{id}:
+    parameters:
+    - name: id
+      in: path
+      description: Annieuser id
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - active
+      - admin
+      - app
+      summary: Read annieuser
+      description: |
+        Read annieuser data.
+        If id is given result is data for matching annieuser.
+        If id is omitted result depends on currently logged in annieuser.
+      operationId: getAnnieuserById2
+      responses:
+        "200":
+          description: OK. Results given
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/annieuser'
+        "400":
+          description: Unknown error
+        "401":
+          description: Unauthorized
+    delete:
+      tags:
+      - active
+      - admin
+      summary: Delete annieuser
+      description: |
+        Delete annieuser.
+      operationId: deleteAnnieuserById2
+      parameters:
+      - name: id
+        in: path
+        description: Annieuser id
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK. Annieuser deleted
+        "400":
+          description: Invalid argument/input
+        "401":
+          description: Unauthorized
+        "409":
+          description: Data problem
+  /v2/annieuser.php:
+    post:
+      tags:
+      - active
+      - admin
+      summary: Add or update one or many annieuser
+      description: |
+        Updates and/or inserts one or many annieusers.
+      operationId: postAnnieuser2
+      responses:
+        "200":
+          description: OK. Items updated or inserted
+        "400":
+          description: Invalid argument/input or data problem
+        "401":
+          description: Unauthorized
+        "409":
+          description: Data problem in a batch
+      requestBody:
+        description: Annieuser JSON
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/annieuser'
+
+  /v2/annieusersurvey.php/{id}:
+    parameters:
+    - name: id
+      in: path
+      description: Annieusersurvey id
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - active
+      - admin
+      summary: Read annieusersurvey
+      description: |
+        Get annieusersurvey data.
+      operationId: getAnnieusersurveyById2
+      parameters:
+      - name: id
+        in: query
+        description: Annieusersurvey id
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+      - name: survey
+        in: query
+        description: Survey id
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/annieusersurvey'
+        "400":
+          description: Data problem
+        "401":
+          description: Unauthorized
+    put:
+      tags:
+      - active
+      - admin
+      deprecated: true
+      summary: DEPRECATED Update annieusersurvey
+      description: |
+        Update annieusersurvey data.
+        DEPRECATED, see post.
+      operationId: putAnnieusersurveyById2
+      requestBody:
+        description: Annieusersurvey JSON
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/annieusersurvey'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Data problem
+        "401":
+          description: Unauthorized
+    
+  /v2/annieusersurvey.php:
+    post:
+      tags:
+      - active
+      - admin
+      summary: Add or update one to many annieusersurveys
+      description: |
+        Updates and/or inserts one to many annieusersurveys.
+      operationId: postAnnieusersurvey2
+      requestBody:
+        description: Annieusersurvey JSON
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/annieusersurvey'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid argument/input or data problem
+        "401":
+          description: Unauthorized
+        "409":
+          description: Data problem in a batch
+
+  /v2/codes.php:
+    get:
+      tags:
+      - active
+      - admin
+      - app
+      summary: Read codes
+      description: |
+        Read codes. Path arguments codeset and code are optional.
+      operationId: getCodes2
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/codes'
+        "400":
+          description: Invalid argument or data problem
+        "401":
+          description: Unauthorized
+  /v2/codes.php/{codeset}:
+    parameters:
+    - name: codeset
+      in: path
+      description: Codeset
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - active
+      - admin
+      - app
+      summary: Read codeset
+      description: |
+        Read codeset from codes.
+      operationId: getCodesCodeset2
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                    $ref: '#/components/schemas/codes'
+        "400":
+          description: Invalid argument or data problem
+        "401":
+          description: Unauthorized
+  /v2/codes.php/{codeset}/{code}:
+    parameters:
+    - name: codeset
+      in: path
+      description: Codeset
+      required: true
+      schema:
+        type: string
+    - name: code
+      in: path
+      description: Code in codeset
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - active
+      - admin
+      - app
+      summary: Read codeset code
+      description: |
+        Read codeset and code from codes.
+      operationId: getCodesCodesetCode2
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/codes'
+        "400":
+          description: Invalid argument or data problem
+        "401":
+          description: Unauthorized
+
+  /v2/config.php:
+    get:
+      tags:
+      - active
+      - admin
+      - app
+      summary: Read config
+      description: |
+        Read config. Path arguments segment and field are optional.
+      operationId: getConfig2
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/config'
+        "400":
+          description: Invalid argument or data problem
+  /v2/config.php/{segment}:
+    parameters:
+    - name: segment
+      in: path
+      description: Segment
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - active
+      - admin
+      - app
+      summary: Read segment
+      description: |
+        Read segment from config.
+      operationId: getConfigSegment2
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/config'
+        "400":
+          description: Invalid argument or data problem
+  /v2/config.php/{segment}/{field}:
+    parameters:
+    - name: segment
+      in: path
+      description: Segment
+      required: true
+      schema:
+        type: string
+    - name: field
+      in: path
+      description: Field in segment
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - active
+      - admin
+      - app
+      summary: Read segment field
+      description: |
+        Read segment and field from config.
+      operationId: getConfigSegmentField2
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/config'
+        "400":
+          description: Invalid argument or data problem
+
+  /v2/contact.php:
+    get:
+      tags:
+      - active
+      - admin
+      - app
+      summary: Read contacts
+      description: |
+        Read contacts.
+      operationId: getContact2
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/contact'
+        "401":
+          description: Unauthorized
+  /v2/contact.php/{id}:
+    parameters:
+    - name: id
+      in: path
+      description: Contact id
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - active
+      - admin
+      - app
+      summary: Read contact
+      description: |
+        Read contact.
+      operationId: getContactById2
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/contact'
+        "401":
+          description: Unauthorized
+
+  /v2/supportneed.php:
+    get:
+      tags:
+      - active
+      - admin
+      - app
+      summary: Read supportneeds
+      description: |
+        Read supportneeds.
+      operationId: getSupportneed2
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/supportneed'
+        "400":
+          description: Invalid argument or data problem
+        "401":
+          description: Unauthorized
+    post:
+      tags:
+      - active
+      - admin
+      - app
+      summary: Add supportneed
+      description: |
+        Insert supportneed.
+      operationId: postSupportneed2
+      requestBody:
+        description: Supportneed JSON
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/supportneed'
+      responses:
+        "200":
+          description: OK. Item inserted
+        "400":
+          description: Invalid input or data problem
+        "401":
+          description: Unauthorized
+  /v2/supportneed.php/{id}:
+    parameters:
+    - name: id
+      in: path
+      description: Supportneed id
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - active
+      - admin
+      - app
+      summary: Read supportneed
+      description: |
+        Read supportneed.
+      operationId: getSupportneedById2
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/supportneed'
+        "400":
+          description: Invalid argument or data problem
+        "401":
+          description: Unauthorized
+
+  /v2/supportneedcomment.php:
+    post:
+      tags:
+      - active
+      - app
+      summary: Add supportneedcomment
+      description: |
+        Insert supportneedcomment.
+      operationId: postSupportneedcomment2
+      requestBody:
+        description: Supportneedcomment JSON
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/supportneedcomment'
+      responses:
+        "200":
+          description: OK. Item inserted
+        "400":
+          description: Invalid input or data problem
+
+  /v2/survey.php:
+    get:
+      tags:
+      - active
+      - admin
+      - app
+      summary: Read surveys
+      description: |
+        Read surveys.
+      operationId: getSurvey2
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/survey'
+        "400":
+           description: Data problem
+  /v2/survey.php/{id}:
+    parameters:
+    - name: id
+      in: path
+      description: Survey id
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - active
+      - admin
+      - app
+      summary: Read survey
+      description: |
+        Read survey.
+      operationId: getSurveyById2
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/survey'
+        "400":
+           description: Data problem
+    put:
+      tags:
+      - active
+      - admin
+      summary: Update survey
+      description: |
+        Update survey.
+      operationId: putSurveyById2
+      requestBody:
+        description: Survey JSON
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/survey'
+      responses:
+        "200":
+          description: OK. Survey updated
+        "400":
+          description: Invalid input/argument or data problem
+        "401":
+          description: Unauthorized
+    post:
+      tags:
+      - active
+      - admin
+      summary: Add survey
+      description: |
+        Insert survey.
+      operationId: postSurveyById2
+      requestBody:
+        description: Survey JSON
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/survey'
+      responses:
+        "200":
+          description: OK. Survey inserted
+        "400":
+          description: Invalid input/argument or data problem
+        "401":
+          description: Unauthorized
+
+
+  # specialized paths
+
+  /v2/annieusersupportneeds.php:
+    get:
+      tags:
+      - active
+      - app
+      summary: Read supportneeds for logged in annieuser
+      description: |
+        Return all supportneeds for active user with survey data aside. Excluding supportneeds that reference archived survey.
+      operationId: getAnnieusersupportneeds2
+      parameters:
+      - name: impersonate
+        in: query
+        schema:
+          type: string
+      - name: usagerequest
+        in: query
+        description: Role in which data is wished to return from request
+        schema:
+          $ref: '#/components/schemas/usagerequest'
+      - name: category
+        in: query
+        schema:
+          type: array
+          items:
+            type: string
+      - name: status
+        in: query
+        schema:
+          type: array
+          items:
+            type: string
+      - name: survey
+        in: query
+        schema:
+          type: array
+          items:
+            type: string
+      - name: supporttype
+        in: query
+        schema:
+          type: array
+          items:
+            $ref: '#/components/schemas/supporttype'
+      - name: followuptype
+        in: query
+        schema:
+          type: array
+          items:
+            $ref: '#/components/schemas/followuptype'
+      - name: followupresult
+        in: query
+        schema:
+          type: array
+          items:
+            $ref: '#/components/schemas/followupresult'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  #$ref: '#/components/schemas/supportneed'
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                      description: Supportneed id
+                    updated:
+                      type: string
+                      format: date-time
+                      description: Supportneed updated
+                    updatedby:
+                      type: string
+                      description: Supportneed updated by
+                      example: "Annie User"
+                    contact:
+                      type: string
+                      description: Contact id
+                      example: "MJs4ysU0kay"
+                    category:
+                      type: string
+                      description: Category code
+                      example: "C3"
+                    status:
+                      $ref: '#/components/schemas/supportneedStatus'
+                    survey:
+                      type: string
+                      description: Survey id
+                      example: "1694207654321"
+                    supporttype:
+                      $ref: '#/components/schemas/supporttype'
+                    followuptype:
+                      $ref: '#/components/schemas/followuptype'
+                    followupresult:
+                      $ref: '#/components/schemas/followupresult'
+                    followupstatus:
+                      type: string
+                      # kinda iffy:
+                      enum: ["1","**","100"]
+                      example: "100"
+                    starttime:
+                      type: string
+                      format: date-time
+                      description: Survey start time
+                    endtime:
+                      type: string
+                      format: date-time
+                      description: Survey end time
+        "400":
+          description: Data problem
+        "401":
+          description: Unauthorized
+      
+  /v2/annieuseruploadsave.php:
+    post:
+      tags:
+      - active
+      - admin
+      summary: Save annieuser data
+      description: |
+        Save provided JSON array containing annieuser data (produced by annieuseruploadvalidate.php API) into database.
+      operationId: postAnnieuserupload2
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/annieuser'
+                  insert:
+                    type: boolean
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  meta:
+                    type: object
+                    properties:
+                      insert:
+                        type: integer
+                      update:
+                        type: integer
+                      errors:
+                        type: integer
+                  insertids:
+                    type: array
+                    items:
+                      type: string
+                      example: "annie@annieadvisor.com"
+                  updateids:
+                    type: array
+                    items:
+                      type: string
+                  message:
+                    type: string
+                    description: If other action than insert or update was attempted.
+        "400":
+          description: Invalid input
+        "401":
+          description: Unauthorized
+
+  /v2/annieuseruploadvalidate.php:
+    post:
+      tags:
+      - active
+      - admin
+      summary: Validate annieuser data from Excel file
+      description: |
+        Read in and parse Excel file for annieuser data and provide validation information about the data as well as JSON array containing annieuser data.
+      operationId: postAnnieuseruploadvalidate2
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                fileup:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  meta:
+                    type: object
+                    properties:
+                      update:
+                        type: integer
+                      insert:
+                        type: integer
+                      errors:
+                        type: integer
+                  annieusers:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        data:
+                          $ref: '#/components/schemas/annieuser'
+                        insert:
+                          type: boolean
+        "400":
+          description: Invalid input or data problem
+        "401":
+          description: Unauthorized
+
+  /v2/auth.php:
+    post:
+      tags:
+      - active
+      - admin
+      - app
+      summary: Check authentication status
+      description: |
+        Authentication and session refresh.
+      operationId: postAuth2
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                returnto:
+                  type: string
+                source:
+                  type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logoutURL:
+                    type: string
+                  uid:
+                    type: string
+                  firstname:
+                    type: string
+                  lastname:
+                    type: string
+                  status:
+                    type: string
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  reason:
+                    type: string
+                  loginURL:
+                    type: string
+
+  /v2/contactmessages.php:
+    get:
+      tags:
+      - active
+      - app
+      summary: Read messages
+      description: |
+        Read messages.
+      operationId: getContactmessages2
+      parameters:
+      - name: impersonate
+        in: query
+        schema:
+          type: string
+          description: Annieuser id
+          example: "annie@annieadvisor.com"
+      - name: usagerequest
+        in: query
+        description: Role in which data is wished to return from request
+        schema:
+          $ref: '#/components/schemas/usagerequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/message'
+        "400":
+          description: Invalid argument or data problem
+        "401":
+          description: Unauthorized
+  /v2/contactmessages.php/{id}:
+    get:
+      tags:
+      - active
+      - app
+      summary: Read contact messages
+      description: |
+        Read contact messages.
+      operationId: getContactmessagesById2
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Contact id
+          example: "MJs4ysU0kay"
+      - name: impersonate
+        in: query
+        schema:
+          type: string
+          description: Annieuser id
+          example: "annie@annieadvisor.com"
+      - name: usagerequest
+        in: query
+        description: Role in which data is wished to return from request
+        schema:
+          $ref: '#/components/schemas/usagerequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/message'
+        "400":
+          description: Invalid argument or data problem
+        "401":
+          description: Unauthorized
+
+  /v2/contactuploadsave.php:
+    post:
+      tags:
+      - active
+      - admin
+      summary: Save contact data
+      description: |
+        Save provided JSON array containing contact data (produced by contactuploadvalidate.php API) into database.
+      operationId: postContactuploadsave2
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/contact'
+                  insert:
+                    type: boolean
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  meta:
+                    type: object
+                    properties:
+                      insert:
+                        type: integer
+                      update:
+                        type: integer
+                      errors:
+                        type: integer
+                  insertids:
+                    type: array
+                    items:
+                      type: string
+                      example: "COntactID2"
+                  updateids:
+                    type: array
+                    items:
+                      type: string
+                      example: "COntactID1"
+                  message:
+                    type: string
+                    description: If other action than insert or update was attempted.
+        "400":
+          description: Invalid input
+        #todo: whoa
+        #"401":
+        #  description: Unauthorized
+
+  /v2/contactuploadvalidate.php:
+    post:
+      tags:
+      - active
+      - admin
+      summary: Validate contact data from Excel file
+      description: |
+        Read in and parse Excel file for contact data and provide validation information about the data as well as JSON array containing contact data.
+      operationId: postContactuploadvalidate2
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                fileup:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  meta:
+                    type: object
+                    properties:
+                      update:
+                        type: integer
+                      insert:
+                        type: integer
+                      errors:
+                        type: integer
+                  contacts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        data:
+                          $ref: '#/components/schemas/contactmeta'
+                        insert:
+                          type: boolean
+        "400":
+          description: Invalid input or data problem
+        #todo: whoa
+        #"401":
+        #  description: Unauthorized
+
+  /v2/resend.php/{id}:
+    post:
+      tags:
+      - active
+      summary: Re-initiate survey for contact
+      description: |
+        For resending a survey to selected contacts. In case of faulty phonenumbers in the previous attempt, for example. Basically the same as library/initiate.
+      operationId: postResendById2
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Survey id
+          example: "1694207654321"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: string
+                description: Contact id
+                example: "COntactID1"
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid argument/input or data problem
+        "401":
+          description: Unauthorized
+
+  /v2/sendmail.php:
+    get:
+      tags:
+      - active
+      summary: Send email
+      description: |
+        For sending an email to Annie's client mailbox.
+      operationId: getSendmail2
+      parameters:
+      - name: subject
+        in: query
+        schema:
+          type: string
+      - name: body
+        in: query
+        description: Either body or html
+        schema:
+          type: string
+      - name: html
+        in: query
+        description: Either body or html
+        schema:
+          type: string
+      - name: plaintext
+        in: query
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+        "409":
+          description: Mail sending failed
+    post:
+      tags:
+      - active
+      summary: Send email
+      description: |
+        For sending an email to Annie's client mailbox.
+      operationId: postSendmail2
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                subject:
+                  type: string
+                body:
+                  type: string
+                  description: Either body or html
+                html:
+                  type: string
+                  description: Either body or html
+                plaintext:
+                  type: string
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid input
+        "409":
+          description: Mail sending failed
+
+  /v2/sendsms.php:
+    post:
+      tags:
+      - active
+      summary: Send SMS
+      description: |
+        Send SMS.
+      operationId: postSendsms2
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                to:
+                  type: string
+                  description: Phonenumber
+                body:
+                  type: string
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Invalid input or data problem
+
+  /v2/supportneedsupportneedcomments.php/{id}:
+    get:
+      tags:
+      - active
+      - app
+      summary: Read supportneedcomments of a supportneed
+      description: |
+        Get support need comments for given support need.
+      operationId: getSupportneedsupportneedcomments2
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          description: Supportneed id
+          example: 1234
+      - name: impersonate
+        in: query
+        schema:
+          type: string
+          description: Annieuser id
+          example: "annie@annieadvisor.com"
+      - name: usagerequest
+        in: query
+        description: Role in which data is wished to return from request
+        schema:
+          $ref: '#/components/schemas/usagerequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/supportneedcomment'
+        "400":
+          description: Invalid argument or data problem
+        "401":
+          description: Unauthorized
+
+  /v2/unsubscribe.php:
+    post:
+      tags:
+      - active
+      - admin
+      summary: Unsubscribe annieuser from notifications
+      description: |
+        Update authenticated users notifications value. Defaults to DISABLED.
+      operationId: postUnsubscribe2
+      requestBody:
+        description: Input body is optional
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                notifications:
+                  type: string
+                  default: "DISABLED"
+                  enum:
+                  - IMMEDIATE
+                  #- DAILYDIGEST
+                  - DISABLED
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Data problem
+
+  /v2/survey-report.php:
+    get:
+      tags:
+      - active
+      - admin
+      summary: Read survey report
+      description: |
+        Read survey report.
+      operationId: getSurveyReport2
+      parameters:
+      - name: survey
+        in: query
+        description: Survey id
+        required: true
+        schema:
+          type: array
+          items:
+            type: string
+      - name: returntype
+        in: query
+        description: Return type
+        required: false
+        schema:
+          type: string
+          enum:
+          - json
+          - csv
+          - csvfile
+          default: json
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json; charset=utf-8:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/surveyreport'
+            text/csv; charset=utf-8: {}
+            text/plain; charset=utf-8: {}
+        "400":
+          description: Invalid argument or data problem
+        "401":
+          description: Unauthorized
+
+components:
+  schemas:
+    annieuser:
+      type: object
+      required:
+      - id
+      - meta
+      properties:
+        id:
+          type: string
+          example: "annieuser@annieadvisor.com"
+        meta:
+          $ref: '#/components/schemas/annieusermeta'
+        superuser:
+          type: boolean
+          default: false
+          example: true
+        notifications:
+          type: string
+          enum:
+          - IMMEDIATE
+          - DAILYDIGEST
+          - DISABLED
+          default: IMMEDIATE
+          example: DISABLED
+        validuntil:
+          type: string
+          format: date
+    annieusermeta:
+      type: object
+      required:
+      - firstname
+      - lastname
+      - email
+      properties:
+        firstname:
+          type: string
+          example: "Annie"
+        lastname:
+          type: string
+          example: "User"
+        email:
+          type: string
+          format: email
+          example: "annieuser@annieadvisor.com"
+        phonenumber:
+          type: string
+          format: phonenumber
+          example: "+358471234567"
+    annieusersurvey:
+      type: object
+      required:
+      - annieuser
+      - survey
+      properties:
+        annieuser:
+          type: string
+          example: "annieuser@annieadvisor.com"
+        survey:
+          type: string
+          example: "1694207654321"
+        meta:
+          $ref: '#/components/schemas/annieusersurveymeta'
+    annieusersurveymeta:
+      type: object
+      properties:
+        coordinator:
+          type: boolean
+          example: true
+        category:
+          type: object
+          properties:
+            categorycode1:
+              type: boolean
+              example: true
+            categorycode2:
+              type: boolean
+              example: true
+    #codes has dynamic structure but underneath:
+    #codes:
+    #  type: object
+    #  required:
+    #  - codeset
+    #  - code
+    #  properties:
+    #    codeset:
+    #      type: string
+    #      example: "category"
+    #    code:
+    #      type: string
+    #      example: "C3"
+    #    value:
+    #      type: object
+    #      format: json
+    #      properties:
+    #        title:
+    #          type: string
+    #          example: "Opintososiaaliset edut"
+    #        theme:
+    #          type: string
+    #          example: "Muu"
+    #    validuntil:
+    #      type: string
+    #      format: date
+    codes:
+      description: |
+        This is a dynamic structure difficult to document.
+      type: object
+      required:
+      - category
+      - C3
+      properties:
+        category:
+          type: object
+          format: json
+          properties:
+            C3:
+              type: object
+              format: json
+              properties:
+                title:
+                  type: string
+                  example: "Opintososiaaliset edut"
+                theme:
+                  type: string
+                  example: "Muu"
+    config:
+      type: object
+      required:
+      - segment
+      - field
+      properties:
+        segment:
+          type: string
+          example: ui
+        field:
+          type: string
+          example: language
+        value:
+          type: object
+          format: json
+          example: '"fi"'
+    contact:
+      type: object
+      required:
+      - id
+      - contact
+      properties:
+        id:
+          type: string
+          example: "COntactID1"
+        contact:
+          $ref: '#/components/schemas/contactmeta'
+        annieuser:
+          type: string
+          example: "annieuser@annieadvisor.com"
+        optout:
+          type: string
+          format: date
+    contactmeta:
+      type: object
+      required:
+      - firstname
+      - lastname
+      - phonenumber
+      properties:
+        firstname:
+          type: string
+          example: "Annie"
+        lastname:
+          type: string
+          example: "Contact"
+        phonenumber:
+          type: string
+          format: phonenumber
+          example: "+3584712345678"
+        degree:
+          type: string
+          example: "Bottikuiskaajan ammattitutkinto"
+        group:
+          type: string
+          example: "Valiojoukko"
+        location:
+          type: string
+          example: "Torilla"
+        customtext:
+          type: string
+        customkey:
+          type: string
+    message:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "MJs4ysU0kay"
+        updated:
+          type: string
+          format: date-time
+        updatedby:
+          type: string
+        contact:
+          type: string
+          example: "COntactID1"
+        body:
+          type: string
+          example: "Are you okay?"
+        sender:
+          type: string
+          example: "Annie Contact"
+        survey:
+          type: string
+          example: "1694207654321"
+        context:
+          type: string
+          example: "SURVEY"
+        status:
+          type: string
+          example: "RECEIVED"
+    supportneed:
+      type: object
+      required:
+      - contact
+      - survey
+      properties:
+        id:
+          type: integer
+          example: 1234
+        contact:
+          type: string
+          example: "COntactID1"
+        survey:
+          type: string
+          example: "1694207654321"
+        category:
+          type: string
+          default: "Z"
+          example: "C3"
+        status:
+          $ref: '#/components/schemas/supportneedStatus'
+        supporttype:
+          $ref: '#/components/schemas/supporttype'
+        followuptype:
+          $ref: '#/components/schemas/followuptype'
+        followupresult:
+          $ref: '#/components/schemas/followupresult'
+    supportneedcomment:
+      type: object
+      required:
+      - supportneed
+      properties:
+        supportneed:
+          type: integer
+          example: 1234
+        body:
+          type: string
+          example: "Comment on support need"
+    survey:
+      type: object
+      required:
+      - id
+      - starttime
+      - endtime
+      properties:
+        id:
+          type: string
+          example: "1694207654321"
+        starttime:
+          type: string
+          format: date-time
+        endtime:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum:
+          - DRAFT
+          - SCHEDULED
+          - INPROGRESS
+          - FINISHED
+          - ARCHIVED
+          - DELETED
+          default: DRAFT
+          example: FINISHED
+        config:
+          type: object
+          format: json
+          properties:
+            title:
+              type: string
+              example: "Survey"
+            message:
+              type: string
+              example: "First message"
+            other:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Message when reply is not understood"
+            branchKEY1:
+              type: object
+              properties:
+                condition:
+                  type: string
+                  example: "^key1\\b"
+                message:
+                  type: string
+                  example: "Message when condition on reply directs to this branch"
+                supportneed:
+                  type: boolean
+                category:
+                  type: string
+                  example: "C3"
+                supporttype:
+                  $ref: '#/components/schemas/supporttype'
+                followuptype:
+                  $ref: '#/components/schemas/followuptype'
+            reminders:
+              type: array
+              items:
+                properties:
+                  delay:
+                    type: integer
+                    example: 24
+                  message:
+                    type: string
+                    example: "Reminder message."
+        contacts:
+          type: array
+          items:
+            type: string
+            example: "COntactID1"
+
+    # specialized schemas
+    surveyreport:
+      type: object
+      properties:
+        surveyid:
+          type: string
+          description: Survey id
+        surveyname:
+          type: string
+          description: Survey name
+        surveystarttime:
+          type: string
+          format: date-time
+          description: Survey start time
+        surveyendtime:
+          type: string
+          format: date-time
+          description: Survey end time
+        contactid:
+          type: string
+          description: Contact id
+        contactmeta:
+          #$ref: '#/components/schemas/contactmeta'
+          type: object
+          properties:
+            degree:
+              type: string
+              example: "Bottikuiskaajan ammattitutkinto"
+            group:
+              type: string
+              example: "Valiojoukko"
+            location:
+              type: string
+              example: "Torilla"
+            customtext:
+              type: string
+            customkey:
+              type: string
+        contactoptout:
+          type: string
+          format: date
+          description: Date when contact opted out
+        delivered:
+          type: integer
+          minimum: 0
+          maximum: 1
+          description: Boolean whether any message was delivered to contact
+        responded:
+          type: integer
+          minimum: 0
+          maximum: 1
+          description: Boolean whether contact responded
+        supportneed:
+          type: integer
+          minimum: 0
+          maximum: 1
+          description: Boolean whether a support need emerged
+        remindercount:
+          type: integer
+          description: Counter of how many times contact was reminded
+        messagesreceived:
+          type: integer
+          description: Counter of how many messages was received from contact
+        messagessent:
+          type: integer
+          description: Counter of how many messages were delivered to contact
+        supportneedcategory:
+          type: string
+          description: Category code of support need
+        supportneedcategoryname:
+          type: string
+          description: Title of the category of support need
+        supportneedstatus:
+          $ref: '#/components/schemas/supportneedStatus'
+        supporttype:
+          $ref: '#/components/schemas/supporttype'
+        followuptype:
+          $ref: '#/components/schemas/followuptype'
+        followupresult:
+          $ref: '#/components/schemas/followupresult'
+        dur_firstresponse:
+          type: number
+          format: float
+          description: Duration (in minutes) from message sent to first response
+        dur_surveyflow:
+          type: number
+          format: float
+          description: Duration (min) from first response to the response that end contacts survey
+        dur_requestseen:
+          type: number
+          format: float
+          description: Duration (min) between support need creation and support need status OPENED
+        dur_requestacked:
+          type: number
+          format: float
+          description: Duration (min) between support need creation and support need status ACKED
+        dur_ackedfollowup:
+          type: number
+          format: float
+          description: Duration (min) between support need status ACKED and follow-up start
+        dur_followupflow:
+          type: number
+          format: float
+          description: Duration (min) between follow-up start and follow-up complete
+        time_firstresponse:
+          type: string
+          format: date-time
+          description: Time of contact first response
+        time_requestacked:
+          type: string
+          format: date-time
+          description: Time of support need request acknowledged
+        time_followup:
+          type: string
+          format: date-time
+          description: Time of follow-up complete
+    # atomic components
+    supportneedStatus:
+      type: string
+      enum:
+      - NEW
+      - OPENED
+      - ACKED
+      default: NEW
+      example: ACKED
+      description: Text code of support need request status
+    supporttype:
+      type: string
+      enum:
+      - MISSING
+      - SUPPORTPROVIDER
+      - TEACHER
+      - INFORMATION
+      default: MISSING
+      example: SUPPORTPROVIDER
+      description: Text code of support type requested
+    followuptype:
+      type: string
+      enum:
+      - MULTIPLECHOICE
+      - LIKERT
+      - NOFOLLOWUP
+      example: MULTIPLECHOICE
+      description: Text code of follow-up type
+    followupresult:
+      type: string
+      enum:
+      - GOTHELP
+      - INPROGRESS
+      - NOHELP
+      - NORESPONSE
+      - OTHER
+      example: GOTHELP
+      description: Text code of result of follow-up
+    usagerequest:
+      type: string
+      enum:
+      - COORDINATOR
+      - SUPPORTPROVIDER
+      - TEACHER
+      example: SUPPORTPROVIDER
+      description: Role in which data is wished to return from request. If a co-ordinator requests data with TEACHER as argument to usagerequest then data is returned as if user was a teacher.

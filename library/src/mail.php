@@ -12,9 +12,9 @@
  * - $settings
  */
 
-$clientname = "annie"; // default value might be wise to hit an existing mail address
-if (gethostname()) {
-  $clientname = explode(".",gethostname())[0];
+$clientname = $settings['my']['name'];
+if (empty($clientname)) {
+  $clientname = "annie"; // default value might be wise to hit an existing mail address
 }
 
 $emaildomain = $settings['mailgun']['domain'];
@@ -144,14 +144,14 @@ function mailOnSurveyStart($surveyrow,$destinations,$annieusers,$firstmessage,$m
 
 /* "When a new supportneed is created that a certain annieuser is responsible for"
 */
-function mailOnSupportneedImmediate($firstname,$lastname,$surveyname,$categoryname,$supportneed,$firstmessage,$nextmessage,$annieusers,$mailcontent,$lang) {
+function mailOnSupportneedImmediate($firstname,$lastname,$surveyname,$categoryname,$supportneedid,$firstmessage,$nextmessage,$annieusers,$mailcontent,$lang) {
   global $replaceablevalues;
 
   if (!isset($firstname) || !isset($lastname) || !isset($surveyname) || !isset($categoryname)) {
     return;
   }
-  if (!isset($supportneed)) {
-    $supportneed = "";
+  if (!isset($supportneedid)) {
+    $supportneedid = "";
   }
   if (!isset($firstmessage)) {
     $firstmessage = "";
@@ -171,8 +171,8 @@ function mailOnSupportneedImmediate($firstname,$lastname,$surveyname,$categoryna
   $replaceablevalues->{"firstname"} = $firstname;
   $replaceablevalues->{"lastname"} = $lastname;
   $replaceablevalues->{"surveyname"} = $surveyname;
-  $replaceablevalues->{"supportneedcategory"} = $categoryname->$lang;
-  $replaceablevalues->{"supportneedid"} = $supportneed;
+  $replaceablevalues->{"supportneedcategory"} = $categoryname->{'title'};
+  $replaceablevalues->{"supportneedid"} = $supportneedid;
   $replaceablevalues->{"lastmessage"} = $nextmessage;
   $replaceablevalues->{"firstmessage"} = $firstmessage;
 
@@ -186,7 +186,7 @@ function mailOnSupportneedImmediate($firstname,$lastname,$surveyname,$categoryna
 
 /* "When a new message to existing supportneed arrives notify responsible for annieuser"
 */
-function mailOnMessageToSupportneedImmediate($firstname,$lastname,$surveyname,$categoryname,$supportneed,$annieusers,$mailcontent,$lang) {
+function mailOnMessageToSupportneedImmediate($firstname,$lastname,$surveyname,$categoryname,$supportneedid,$annieusers,$mailcontent,$lang) {
   global $replaceablevalues;
 
   if (!isset($firstname) || !isset($lastname) || !isset($surveyname) || !isset($categoryname)
@@ -198,8 +198,8 @@ function mailOnMessageToSupportneedImmediate($firstname,$lastname,$surveyname,$c
   $replaceablevalues->{"firstname"} = $firstname;
   $replaceablevalues->{"lastname"} = $lastname;
   $replaceablevalues->{"surveyname"} = $surveyname;
-  $replaceablevalues->{"supportneedcategory"} = $categoryname->$lang;
-  $replaceablevalues->{"supportneedid"} = $supportneed;
+  $replaceablevalues->{"supportneedcategory"} = $categoryname->{'title'};
+  $replaceablevalues->{"supportneedid"} = $supportneedid;
 
   $mailsubject = textUnTemplate($mailcontent->subject->$lang);
 
@@ -209,9 +209,9 @@ function mailOnMessageToSupportneedImmediate($firstname,$lastname,$surveyname,$c
   mailSend(null,$annieusers,$mailsubject,$mailbody,$mailtext,"messageToSupportneedImmediate");
 }
 
-/* "Remind support providers & teachers of support requests with email that are in status 1 or 2."
+/* "Remind support providers & teachers of support requests with email that are in status NEW or OPENED."
 */
-function mailOnReminder($contactdata,$supportneed,$firstmessage,$lastmessage,$annieusers,$mailcontent,$lang) {
+function mailOnReminder($contactdata,$supportneedid,$firstmessage,$lastmessage,$annieusers,$mailcontent,$lang) {
   global $replaceablevalues;
 
   if (!isset($contactdata)) {
@@ -219,7 +219,7 @@ function mailOnReminder($contactdata,$supportneed,$firstmessage,$lastmessage,$an
   } else if (!array_key_exists('firstname', $contactdata) || !array_key_exists('lastname', $contactdata)) {
     return;
   }
-  if (!isset($supportneed) || !isset($annieusers) || !isset($lang)) {
+  if (!isset($supportneedid) || !isset($annieusers) || !isset($lang)) {
     return;
   }
   if (!isset($lastmessage)) {
@@ -234,7 +234,7 @@ function mailOnReminder($contactdata,$supportneed,$firstmessage,$lastmessage,$an
   //$replaceablevalues->{"hostname"} = $clientname;
   $replaceablevalues->{"firstname"} = $contactdata->firstname;
   $replaceablevalues->{"lastname"} = $contactdata->lastname;
-  $replaceablevalues->{"supportneedid"} = $supportneed;
+  $replaceablevalues->{"supportneedid"} = $supportneedid;
   $replaceablevalues->{"firstmessage"} = $firstmessage;
   $replaceablevalues->{"lastmessage"} = $lastmessage;
 
@@ -244,4 +244,26 @@ function mailOnReminder($contactdata,$supportneed,$firstmessage,$lastmessage,$an
   $mailtext = textUnTemplate($mailcontent->plaintext->$lang);
 
   mailSend(null,$annieusers,$mailsubject,$mailbody,$mailtext,"reminder");
+}
+
+/*
+*/
+function mailOnFollowupComplete($mailtag,$replaceables,$annieusers,$mailcontent,$lang) {
+  global $replaceablevalues;
+
+  if (!isset($annieusers) || !isset($mailcontent) || !isset($lang)) {
+    return;
+  }
+
+  //$replaceablevalues->{"hostname"} = $clientname;
+  $replaceablevalues->{"firstname"} = $replaceables->firstname;
+  $replaceablevalues->{"lastname"} = $replaceables->lastname;
+  $replaceablevalues->{"supportneedid"} = $replaceables->supportneedid;
+
+  $mailsubject = textUnTemplate($mailcontent->subject->$lang);
+
+  $mailbody = textUnTemplate($mailcontent->html->$lang);
+  $mailtext = textUnTemplate($mailcontent->plaintext->$lang);
+
+  mailSend(null,$annieusers,$mailsubject,$mailbody,$mailtext,$mailtag);
 }

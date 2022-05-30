@@ -65,6 +65,19 @@ switch ($method) {
     }
     break;
   case 'PUT':
+    $sql = "
+      SELECT 1 WHERE (1=0
+        or (:auth_uid) in (select annieuser from $dbschm.usageright_superuser)
+        or (:auth_uid) in (select annieuser from $dbschm.usageright_coordinator)
+      )
+    ";
+    $sth = $anniedb->getDbh()->prepare($sql);
+    $sth->execute(array(':auth_uid' => $auth_uid));
+    if ($sth->rowCount() <= 0) {
+      http_response_code(401);
+      echo json_encode(array("status"=>"UNAUTHORIZED"));
+      exit;
+    }
     if ($input) {
       $ret = $anniedb->updateCodes($input);
       if ($ret !== false) {
@@ -80,6 +93,19 @@ switch ($method) {
     }
     break;
   case 'POST':
+    $sql = "
+      SELECT 1 WHERE (1=0
+        or (:auth_uid) in (select annieuser from $dbschm.usageright_superuser)
+        or (:auth_uid) in (select annieuser from $dbschm.usageright_coordinator)
+      )
+    ";
+    $sth = $anniedb->getDbh()->prepare($sql);
+    $sth->execute(array(':auth_uid' => $auth_uid));
+    if ($sth->rowCount() <= 0) {
+      http_response_code(401);
+      echo json_encode(array("status"=>"UNAUTHORIZED"));
+      exit;
+    }
     if ($input) {
       $ret = $anniedb->insertCodes($input);
       if ($ret !== false) {
@@ -100,6 +126,19 @@ switch ($method) {
     }
     break;
   case 'DELETE':
+    $sql = "
+      SELECT 1 WHERE (1=0
+        or (:auth_uid) in (select annieuser from $dbschm.usageright_superuser)
+        or (:auth_uid) in (select annieuser from $dbschm.usageright_coordinator)
+      )
+    ";
+    $sth = $anniedb->getDbh()->prepare($sql);
+    $sth->execute(array(':auth_uid' => $auth_uid));
+    if ($sth->rowCount() <= 0) {
+      http_response_code(401);
+      echo json_encode(array("status"=>"UNAUTHORIZED"));
+      exit;
+    }
     if (isset($set) && isset($key)) {
       $ret = $anniedb->deleteCodes($set,$key);
       if ($ret !== false) {

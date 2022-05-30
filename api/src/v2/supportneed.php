@@ -70,18 +70,86 @@ if (count($request)>=1) {
 // create SQL based on HTTP method
 switch ($method) {
   case 'GET':
-    $ret = $anniedb->selectSupportneedHistory($key);
-    if ($ret !== false) {
-      http_response_code(200);
-      echo json_encode($ret);
-    } else {
+    // parameter is mandatory
+    if (empty($key)) {
       http_response_code(400);
-      echo json_encode(array("status"=>"FAILED"));
+      echo json_encode(array("status"=>"FAILED", "message"=>"key missing"));
+    } else {
+      $sql = "
+        SELECT 1
+        FROM $dbschm.supportneed
+        WHERE (1=0
+          or (:auth_uid) in (select annieuser from $dbschm.usageright_superuser)
+          or (:auth_uid,survey) in (select annieuser,survey from $dbschm.usageright_coordinator)
+          or (:auth_uid,survey,category) in (select annieuser,survey,category from $dbschm.usageright_provider)
+          or (
+            (:auth_uid,contact) in (select annieuser,teacherfor from $dbschm.usageright_teacher)
+            and (survey,category) NOT in (select survey,category from $dbschm.usageright_provider)
+          )
+        )
+        -- check usage right from the latest supportneed (=current)
+        AND id = (
+          select max(snlast.id)
+          from $dbschm.supportneed snlast
+          where snlast.contact = supportneed.contact
+          and snlast.survey = supportneed.survey
+          -- given id is in this request chain
+          and :supportneed in (
+            select snchain.id from $dbschm.supportneed snchain
+            where snchain.contact = supportneed.contact and snchain.survey = supportneed.survey
+          )
+        )
+        LIMIT 1
+      ";
+      $sth = $anniedb->getDbh()->prepare($sql);
+      $sth->bindParam(':auth_uid', $auth_uid);
+      if ($key) {
+        $sth->bindParam(':supportneed', $key);
+      }
+      $sth->execute();
+      if ($sth->rowCount() <= 0) {
+        http_response_code(401);
+        echo json_encode(array("status"=>"UNAUTHORIZED"));
+        exit;
+      }
+      $ret = $anniedb->selectSupportneedHistory($key);
+      if ($ret !== false) {
+        http_response_code(200);
+        echo json_encode($ret);
+      } else {
+        http_response_code(400);
+        echo json_encode(array("status"=>"FAILED"));
+      }
     }
     break;
   case 'POST':
+    // checking here for existing supportneed values is kinda silly
+    // since we might be inserting the first one now but as it is
+    // supportneeds are created with engine and not via user with API...
+    $sql = "
+      SELECT 1
+      FROM $dbschm.supportneed
+      WHERE (1=0
+        or (:auth_uid) in (select annieuser from $dbschm.usageright_superuser)
+        or (:auth_uid,survey) in (select annieuser,survey from $dbschm.usageright_coordinator)
+        or (:auth_uid,survey,category) in (select annieuser,survey,category from $dbschm.usageright_provider)
+        or (
+          (:auth_uid,contact) in (select annieuser,teacherfor from $dbschm.usageright_teacher)
+          and (survey,category) NOT in (select survey,category from $dbschm.usageright_provider)
+        )
+      )
+      LIMIT 1
+    ";
+    $sth = $anniedb->getDbh()->prepare($sql);
+    $sth->execute(array(':auth_uid' => $auth_uid));
+    if ($sth->rowCount() <= 0) {
+      http_response_code(401);
+      echo json_encode(array("status"=>"UNAUTHORIZED"));
+      exit;
+    }
     if ($input) {
-      $ret = $anniedb->insertSupportneed($input);
+      // pass auth_uid (auth_user) for checking access in lib also
+      $ret = $anniedb->insertSupportneed($input,$auth_uid);
       if ($ret !== false) {
         http_response_code(200);
         echo json_encode(array("status"=>"OK", "id"=>$ret));
@@ -90,8 +158,8 @@ switch ($method) {
         echo json_encode(array("status"=>"FAILED"));
       }
     } else {
-      http_response_code(400); // bad request
-      echo json_encode(array("status"=>"FAILED"));
+      http_response_code(400);
+      echo json_encode(array("status"=>"FAILED", "message"=>"input missing"));
       exit;
     }
     break;

@@ -53,7 +53,27 @@ if (count($request)>=1) {
 // create SQL based on HTTP method
 switch ($method) {
   case 'GET':
-    $ret = $anniedb->selectContact($key);
+    $sql = "
+      SELECT 1 WHERE (1=0
+        or (:auth_uid) in (select annieuser from $dbschm.usageright_superuser)
+        or (:auth_uid) in (select annieuser from $dbschm.usageright_coordinator)
+        -- survey is NOT set but user still has access
+        or (:auth_uid) in (select annieuser from $dbschm.usageright_provider)
+        or (
+          -- student is NOT set but user still has access
+          (:auth_uid) in (select annieuser from $dbschm.usageright_teacher)
+          --cant negate providers due to no category because of no supportneed via survey
+        )
+      )
+    ";
+    $sth = $anniedb->getDbh()->prepare($sql);
+    $sth->execute(array(':auth_uid' => $auth_uid));
+    if ($sth->rowCount() <= 0) {
+      http_response_code(401);
+      echo json_encode(array("status"=>"UNAUTHORIZED"));
+      exit;
+    }
+    $ret = $anniedb->selectContact($key,$auth_uid);
     if ($ret !== false) {
       http_response_code(200);
       echo json_encode($ret);

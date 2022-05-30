@@ -1,6 +1,6 @@
 <?php
 /* surveyengine.php
- * Copyright (c) 2021 Annie Advisor
+ * Copyright (c) 2021-2022 Annie Advisor
  * All rights reserved.
  * Contributors:
  *  Lauri Jokipii <lauri.jokipii@annieadvisor.com>
@@ -136,13 +136,13 @@ if (isset($contactnumber) && isset($contactid) && isset($survey)
       "updatedby"=>"Engine" //not important
     ))));
     if (!$areyouokay) {
-      error_log("WARNING: Engine: insert contactsurvey(1) failed");
+      error_log("ERROR: Engine: insert contactsurvey(1) failed");
+      $areyouokay = false;
     }
     //...continue anyway
 
     // make message(s) personalized
     // replace string placeholders, like "{{ firstname }}"
-    $categorynamelocalized = $anniedb->originalSurveySupportneedCategoryNameLocalized($contactid,$survey);
     // nextmessage
     $replaceables = preg_split('/[^{]*(\{\{[^}]+\}\})[^{]*/', $nextmessage, -1, PREG_SPLIT_NO_EMPTY|PREG_SPLIT_DELIM_CAPTURE);
     $personalized = $nextmessage;
@@ -151,9 +151,6 @@ if (isset($contactnumber) && isset($contactid) && isset($survey)
         $replacekey = trim(strtolower(preg_replace('/\{\{\s*([^}]+)\s*\}\}/', '$1', $replaceable)));
         if (array_key_exists($replacekey, $contact)) {
           $personalized = str_replace($replaceable, $contact->{$replacekey}, $personalized);
-        }
-        if ($replaceable == "originalsurvey.supportneed.category.name") {
-          $personalized = str_replace($replaceable, $categorynamelocalized, $personalized);
         }
       }
     }
@@ -166,9 +163,6 @@ if (isset($contactnumber) && isset($contactid) && isset($survey)
         $replacekey = trim(strtolower(preg_replace('/\{\{\s*([^}]+)\s*\}\}/', '$1', $replaceable)));
         if (array_key_exists($replacekey, $contact)) {
           $personalized = str_replace($replaceable, $contact->{$replacekey}, $personalized);
-        }
-        if ($replaceable == "originalsurvey.supportneed.category.name") {
-          $personalized = str_replace($replaceable, $categorynamelocalized, $personalized);
         }
       }
     }
@@ -193,12 +187,10 @@ if (isset($contactnumber) && isset($contactid) && isset($survey)
       ))));
       //error_log("DEBUG: Engine: insert message: id=$messageid");
       if ($messageid === FALSE) {
+        error_log("ERROR: Engine: insert message failed");
         $areyouokay = false;
       }
-      // test $areyouokay
-      if (!$areyouokay) {
-        error_log("ERROR: Engine: insert message failed");
-      } else {
+      if ($areyouokay) {
         $res = json_decode(json_encode($anniedb->selectConfig('sms','validity')))[0];
         $smsvalidity = isset($res->value) ? $res->value : 1440;//default 24h
         //error_log("DEBUG: Engine: sendSms: contactnumber=$contactnumber messageid=$messageid smsvalidity=$smsvalidity");
@@ -240,121 +232,140 @@ if (isset($contactnumber) && isset($contactid) && isset($survey)
                 "updatedby"=>"Engine",
                 "status"=>$data["status"]
               ))));
+              if (!$areyouokay) {
+                error_log("ERROR: Engine: update message failed");
+                $areyouokay = false;
+              }
             }
           }
         }
-        //todo test $areyouokay
       }
     }
     if ($dosupportneed) {
-      $category = "Z";//Unknown, actual default by anniedb but use it here for clarity
+      $category = "Z"; // Unknown, actual default by anniedb but use it here for clarity
+      $status = "NEW"; // default
+      $supporttype = "MISSING"; // default
+      $followuptype = null; // default not existing
       if (array_key_exists("category", $currentphaseconfig)) {
         $category = $currentphaseconfig->{'category'};
       }
-      $areyouokay = $anniedb->insertSupportneed(json_decode(json_encode(array(
-        "contact"=>$contactid,
-        //default: "updated"=>null,
-        "updatedby"=>"Annie", // UI shows this
-        //not needed: "contact"=>$contactid,
-        "category"=>$category,
-        //not needed: "status"=>1,
-        "survey"=>$survey
-        //? "userrole"=>?
-      ))));
-      // areyouokay has inserted id or is false
-      if (!$areyouokay) {
-        error_log("WARNING: Engine: insert supportneed failed");
-        //...continue anyway
-      } else {
-        $supportneed = $areyouokay;
-        // mail immediately to "annieuser is responsible for"
-        // we do know survey and category so
-        // query annieusers "responsible for"
-        // nb! not for superusers
-        $sql = "
-        select id, meta, iv
-        from $dbschm.annieuser
-        where id in (
-          select annieuser
-          from $dbschm.annieusersurvey
-          where survey = :survey
-          and (meta->'category'->:category)::boolean
-          union --AD-260 responsible teacher
-          select annieuser
-          from $dbschm.usageright_teacher
-          where teacherfor = :contact
-          and (:survey,:category) NOT in (select survey,category from $dbschm.usageright_provider)
-        )
-        and notifications = 'IMMEDIATE'
-        ";
-        $sth = $dbh->prepare($sql);
-        $sth->bindParam(':survey', $survey);
-        $sth->bindParam(':category', $category);
-        $sth->bindParam(':contact', $contactid);
-        $sth->execute();
-        $annieuserrows = json_decode(json_encode($sth->fetchAll(PDO::FETCH_ASSOC)));
-        $annieusers = array();
-        foreach ($annieuserrows as $au) {
-          $annieuser = (object)array("id" => $au->{'id'});
-          $iv = base64_decode($au->{'iv'});
-          $annieusermeta = json_decode(decrypt($au->{'meta'},$iv));
-          if (isset($annieusermeta) && array_key_exists('email', $annieusermeta)) {
-            $annieuser->{'email'} = $annieusermeta->{'email'};
-            array_push($annieusers, $annieuser);
-          }
-        }
-
-        $res = json_decode(json_encode($anniedb->selectConfig('mail','supportneedImmediate')))[0];
-        $mailcontent = isset($res->value) ? json_decode($res->value) : null;
-
-        $res = json_decode(json_encode($anniedb->selectConfig('ui','language')))[0];
-        $lang = isset($res->value) ? json_decode($res->value) : null;
-
-        $firstname = null;
-        $lastname = null;
-        $surveyname = null;
-        $categoryname = null;
-        $contacts = json_decode(json_encode($anniedb->selectContact($contactid)));
-        if (isset($contacts) && is_array($contacts) && !empty($contacts)) {
-          if (isset($contacts[0])) {
-            if (array_key_exists('contact', $contacts[0])) {
-              if (array_key_exists('firstname', $contacts[0]->{'contact'})) {
-                $firstname = $contacts[0]->{'contact'}->{'firstname'};
-              }
-              if (array_key_exists('lastname', $contacts[0]->{'contact'})) {
-                $lastname = $contacts[0]->{'contact'}->{'lastname'};
-              }
-            }
-          }
-        }
-        $surveys = json_decode(json_encode($anniedb->selectSurvey($survey,array())));
-        if (isset($surveys) && is_array($surveys) && !empty($surveys)) {
-          if (isset($surveys[0])) {
-            if (array_key_exists('config',$surveys[0])) {
-              if (array_key_exists('title',$surveys[0]->{'config'})) {
-                $surveyname = $surveys[0]->{'config'}->{'title'};
-              }
-            }
-          }
-        }
-        $categorynames = json_decode(json_encode($anniedb->selectCodes('category',$category)));
-        if (is_array($categorynames) && count($categorynames)>0) {
-          $categoryname = $categorynames[0];
-        } else {
-          $categoryname = (object)array($lang => $category); // default to code?
-        }
-
-        if (isset($firstname) && isset($lastname) && isset($surveyname) && isset($categoryname)
-         && isset($annieusers) && !empty($annieusers) && isset($mailcontent) && isset($lang)
-        ) {
-          //AD-285 "Change notifications so that only the “final” support need causes notifications"
-          if ($nextphaseisleaf) {
-            mailOnSupportneedImmediate($firstname,$lastname,$surveyname,$categoryname,$supportneed,$firstmessage,$nextmessage,$annieusers,$mailcontent,$lang);
-          }
+      if (array_key_exists("supporttype", $currentphaseconfig)) {
+        $supporttype = $currentphaseconfig->{'supporttype'};
+        if ($supporttype == "INFORMATION") {
+          $status = "ACKED";
         }
       }
-    }
-  }
+      if (array_key_exists("category", $currentphaseconfig)) {
+        $followuptype = $currentphaseconfig->{'followuptype'};
+      }
+      $supportneedid = $anniedb->insertSupportneed(json_decode(json_encode(array(
+        //default: "updated" => null,
+        "updatedby" => "Annie", // UI shows this
+        "contact" => $contactid,
+        "survey" => $survey,
+        "category" => $category,
+        "status" => $status,
+        "supporttype" => $supporttype,
+        "followuptype" => $followuptype
+        //previous: followupresult
+      ))));
+      if ($supportneedid === FALSE) {
+        error_log("ERROR: Engine: insert supportneed failed");
+        $areyouokay = false;
+      } else {
+        // no mail notification on supportneeds of supporttype INFORMATION
+        if ($supporttype != "INFORMATION") {
+          // mail immediately to "annieuser is responsible for"
+          // we do know survey and category so
+          // query annieusers "responsible for"
+          // nb! not for superusers
+          $sql = "
+          select id, meta, iv
+          from $dbschm.annieuser
+          where id in (
+            select annieuser
+            from $dbschm.annieusersurvey
+            where survey = :survey
+            and (meta->'category'->:category)::boolean
+            union --AD-260 responsible teacher
+            select annieuser
+            from $dbschm.usageright_teacher
+            where teacherfor = :contact
+            and (:survey,:category) NOT in (select survey,category from $dbschm.usageright_provider)
+          )
+          and notifications = 'IMMEDIATE'
+          and coalesce(validuntil,'9999-09-09') > now()
+          ";
+          $sth = $dbh->prepare($sql);
+          $sth->bindParam(':survey', $survey);
+          $sth->bindParam(':category', $category);
+          $sth->bindParam(':contact', $contactid);
+          $sth->execute();
+          $annieuserrows = json_decode(json_encode($sth->fetchAll(PDO::FETCH_ASSOC)));
+          $annieusers = array();
+          foreach ($annieuserrows as $au) {
+            $annieuser = (object)array("id" => $au->{'id'});
+            $iv = base64_decode($au->{'iv'});
+            $annieusermeta = json_decode(decrypt($au->{'meta'},$iv));
+            if (isset($annieusermeta) && array_key_exists('email', $annieusermeta)) {
+              $annieuser->{'email'} = $annieusermeta->{'email'};
+              array_push($annieusers, $annieuser);
+            }
+          }
+
+          $res = json_decode(json_encode($anniedb->selectConfig('mail','supportneedImmediate')))[0];
+          $mailcontent = isset($res->value) ? json_decode($res->value) : null;
+
+          $res = json_decode(json_encode($anniedb->selectConfig('ui','language')))[0];
+          $lang = isset($res->value) ? json_decode($res->value) : null;
+
+          $firstname = null;
+          $lastname = null;
+          $surveyname = null;
+          $categoryname = null;
+          $contacts = json_decode(json_encode($anniedb->selectContact($contactid)));
+          if (isset($contacts) && is_array($contacts) && !empty($contacts)) {
+            if (isset($contacts[0])) {
+              if (array_key_exists('contact', $contacts[0])) {
+                if (array_key_exists('firstname', $contacts[0]->{'contact'})) {
+                  $firstname = $contacts[0]->{'contact'}->{'firstname'};
+                }
+                if (array_key_exists('lastname', $contacts[0]->{'contact'})) {
+                  $lastname = $contacts[0]->{'contact'}->{'lastname'};
+                }
+              }
+            }
+          }
+          $surveys = json_decode(json_encode($anniedb->selectSurvey($survey,array())));
+          if (isset($surveys) && is_array($surveys) && !empty($surveys)) {
+            if (isset($surveys[0])) {
+              if (array_key_exists('config',$surveys[0])) {
+                if (array_key_exists('title',$surveys[0]->{'config'})) {
+                  $surveyname = $surveys[0]->{'config'}->{'title'};
+                }
+              }
+            }
+          }
+          $categorynames = json_decode(json_encode($anniedb->selectCodes('category',$category)));
+          if (is_array($categorynames) && count($categorynames)>0) {
+            $categoryname = $categorynames[0];
+          } else {
+            $categoryname = (object)array('title' => $category); // default to code?
+          }
+
+          if (isset($firstname) && isset($lastname) && isset($surveyname) && isset($categoryname)
+           && isset($annieusers) && !empty($annieusers) && isset($mailcontent) && isset($lang)
+          ) {
+            //AD-285 "Change notifications so that only the “final” support need causes notifications"
+            //AD-500 "Send notifications always when creating support need"
+            //if ($nextphaseisleaf) {
+              mailOnSupportneedImmediate($firstname,$lastname,$surveyname,$categoryname,$supportneedid,$firstmessage,$nextmessage,$annieusers,$mailcontent,$lang);
+            //}
+          }
+        }//-supporttype!=INFORMATION
+      }//-supportneedid!=FALSE
+    }//-dosupportneed
+  }//-nextphase in possiblephases
 
   // if we've reached leaf level end the survey
   if ($nextphaseisleaf) {
@@ -366,9 +377,9 @@ if (isset($contactnumber) && isset($contactid) && isset($survey)
       "updatedby"=>"Engine" //not important
     ))));
     if (!$areyouokay) {
-      error_log("WARNING: Engine: insert contactsurvey(2) failed");
+      error_log("ERROR: Engine: insert contactsurvey(2) failed");
+      $areyouokay = false;
     }
-    //...continue anyway
   }
 }//- mandatory variables
 ?>

@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS message_contact_survey_status_idx ON message (contact,survey,status);

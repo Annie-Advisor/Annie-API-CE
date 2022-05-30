@@ -2,33 +2,37 @@
 
 ## Description
 
-Collection of command line executed PHP scripts that will do data maintenace for Annie database.
+Collection of scripts that will do data check-ups or data maintenance for Annie database.
 
 ## Tasks
 
-Agent has tasks:
+Data check-ups:
 
-- delete all data from a given student
-- delete students with no links to other data
-- delete a given survey
+ - GET `.../contact-duplicates.php`
 
-### Delete all data from a given student
+ - GET `.../contact-missing-name.php`
 
-(`php delete-contact.php -c|--contact contact.id`)
+ - GET `.../contact-missing-phonenumber.php`
 
-With a mandatory direct `contact.id` value as argument deletes all data from database related to that contact (student).
+ - GET `.../annieuser-duplicates.php`
 
+ - GET `.../annieuser-missing-email.php`
 
-### Delete students with no links to other data
+ - GET `.../annieuser-missing-name.php`
 
-(`php delete-contacts-no-data.php`)
-
-Searches for contacts (students) that have no data linked to it and deletes them all.
+ - GET `.../survey-has-many-supportneeds-in-one-branch.php`
 
 
-### Delete a given survey
+Data maintenance tasks:
 
-(`php delete-survey.php -s|--survey survey.id`)
+- POST `.../delete-contact.php/[contact.id]`
 
-With a mandatory direct `survey.id` value as argument deletes all data from database related to that survey (campaign).
+  With a mandatory direct `contact.id` value as argument deletes all data from database related to that contact (student).
+  
+- POST `.../delete-contacts-no-data.php`
 
+  Searches for contacts (students) that have no data linked to it and deletes them all.
+
+- POST `.../delete-survey.php/[survey.id]`
+
+  With a mandatory direct `survey.id` value as argument deletes all data from database related to that survey (campaign).

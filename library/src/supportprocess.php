@@ -1,6 +1,6 @@
 <?php
 /* supportprocess.php
- * Copyright (c) 2021 Annie Advisor
+ * Copyright (c) 2021-2022 Annie Advisor
  * All rights reserved.
  * Contributors:
  *  Lauri Jokipii <lauri.jokipii@annieadvisor.com>
@@ -31,6 +31,9 @@ $contactid
 $survey
 $category
 $supportneedstatus
+$supporttype
+$followuptype
+$followupresult
 */
 
 // check all mandatory variables
@@ -44,111 +47,117 @@ if (isset($contactnumber) && isset($contactid) && isset($survey) && isset($categ
       "contact" => $contactid,
       "survey" => $survey,
       "category" => $category,
-      "status" => '2' //"In progress"
+      "status" => 'OPENED',
+      "supporttype" => $supporttype,
+      "followuptype" => $followuptype,
+      "followupresult" => $followupresult
     );
     $anniedb->insertSupportneed($newsupportneed);
   }
 
-  //error_log("DEBUG: SupportProcess: NOTIFY right persons");
+  // no mail notification on supportneeds of supporttype INFORMATION
+  if ($supporttype != "INFORMATION") {
+    //error_log("DEBUG: SupportProcess: NOTIFY right persons");
 
-  // mail immediately to "annieuser is responsible for"
-  // we do know survey and category so
-  // query annieusers "responsible for"
-  // nb! not for superusers
-  $sql = "
-  select id, meta, iv
-  from $dbschm.annieuser
-  where id in (
-    select annieuser
-    from $dbschm.annieusersurvey
-    where survey = :survey
-    and (meta->'category'->:category)::boolean
-    union --AD-260 responsible teacher
-    select annieuser
-    from $dbschm.usageright_teacher
-    where teacherfor = :contact
-    and (:survey,:category) NOT in (select survey,category from $dbschm.usageright_provider)
-  )
-  and notifications = 'IMMEDIATE'
-  ";
-  $sth = $dbh->prepare($sql);
-  $sth->bindParam(':survey', $survey);
-  $sth->bindParam(':category', $category);
-  $sth->bindParam(':contact', $contactid);
-  $sth->execute();
-  $annieuserrows = json_decode(json_encode($sth->fetchAll(PDO::FETCH_ASSOC)));
-  $annieusers = array();
-  foreach ($annieuserrows as $au) {
-    $annieuser = (object)array("id" => $au->{'id'});
-    $iv = base64_decode($au->{'iv'});
-    $annieusermeta = json_decode(decrypt($au->{'meta'},$iv));
-    if (isset($annieusermeta) && array_key_exists('email', $annieusermeta)) {
-      $annieuser->{'email'} = $annieusermeta->{'email'};
-      array_push($annieusers, $annieuser);
+    // mail immediately to "annieuser is responsible for"
+    // we do know survey and category so
+    // query annieusers "responsible for"
+    // nb! not for superusers
+    $sql = "
+    select id, meta, iv
+    from $dbschm.annieuser
+    where id in (
+      select annieuser
+      from $dbschm.annieusersurvey
+      where survey = :survey
+      and (meta->'category'->:category)::boolean
+      union --AD-260 responsible teacher
+      select annieuser
+      from $dbschm.usageright_teacher
+      where teacherfor = :contact
+      and (:survey,:category) NOT in (select survey,category from $dbschm.usageright_provider)
+    )
+    and notifications = 'IMMEDIATE'
+    and coalesce(validuntil,'9999-09-09') > now()
+    ";
+    $sth = $dbh->prepare($sql);
+    $sth->bindParam(':survey', $survey);
+    $sth->bindParam(':category', $category);
+    $sth->bindParam(':contact', $contactid);
+    $sth->execute();
+    $annieuserrows = json_decode(json_encode($sth->fetchAll(PDO::FETCH_ASSOC)));
+    $annieusers = array();
+    foreach ($annieuserrows as $au) {
+      $annieuser = (object)array("id" => $au->{'id'});
+      $iv = base64_decode($au->{'iv'});
+      $annieusermeta = json_decode(decrypt($au->{'meta'},$iv));
+      if (isset($annieusermeta) && array_key_exists('email', $annieusermeta)) {
+        $annieuser->{'email'} = $annieusermeta->{'email'};
+        array_push($annieusers, $annieuser);
+      }
     }
-  }
 
-  $res = json_decode(json_encode($anniedb->selectConfig('mail','messageToSupportneedImmediate')))[0];
-  $mailcontent = isset($res->value) ? json_decode($res->value) : null;
+    $res = json_decode(json_encode($anniedb->selectConfig('mail','messageToSupportneedImmediate')))[0];
+    $mailcontent = isset($res->value) ? json_decode($res->value) : null;
 
-  $res = json_decode(json_encode($anniedb->selectConfig('ui','language')))[0];
-  $lang = isset($res->value) ? json_decode($res->value) : null;
+    $res = json_decode(json_encode($anniedb->selectConfig('ui','language')))[0];
+    $lang = isset($res->value) ? json_decode($res->value) : null;
 
-  $firstname = null;
-  $lastname = null;
-  $surveyname = null;
-  $categoryname = null;
-  $contacts = json_decode(json_encode($anniedb->selectContact($contactid)));
-  if (isset($contacts) && is_array($contacts) && !empty($contacts)) {
-    if (isset($contacts[0])) {
-      if (array_key_exists('contact', $contacts[0])) {
-        if (array_key_exists('firstname', $contacts[0]->{'contact'})) {
-          $firstname = $contacts[0]->{'contact'}->{'firstname'};
-        }
-        if (array_key_exists('lastname', $contacts[0]->{'contact'})) {
-          $lastname = $contacts[0]->{'contact'}->{'lastname'};
+    $firstname = null;
+    $lastname = null;
+    $surveyname = null;
+    $categoryname = null;
+    $contacts = json_decode(json_encode($anniedb->selectContact($contactid)));
+    if (isset($contacts) && is_array($contacts) && !empty($contacts)) {
+      if (isset($contacts[0])) {
+        if (array_key_exists('contact', $contacts[0])) {
+          if (array_key_exists('firstname', $contacts[0]->{'contact'})) {
+            $firstname = $contacts[0]->{'contact'}->{'firstname'};
+          }
+          if (array_key_exists('lastname', $contacts[0]->{'contact'})) {
+            $lastname = $contacts[0]->{'contact'}->{'lastname'};
+          }
         }
       }
     }
-  }
-  $surveys = json_decode(json_encode($anniedb->selectSurvey($survey,array())));
-  if (isset($surveys) && is_array($surveys) && !empty($surveys)) {
-    if (isset($surveys[0])) {
-      if (array_key_exists('config',$surveys[0])) {
-        if (array_key_exists('title',$surveys[0]->{'config'})) {
-          $surveyname = $surveys[0]->{'config'}->{'title'};
+    $surveys = json_decode(json_encode($anniedb->selectSurvey($survey,array())));
+    if (isset($surveys) && is_array($surveys) && !empty($surveys)) {
+      if (isset($surveys[0])) {
+        if (array_key_exists('config',$surveys[0])) {
+          if (array_key_exists('title',$surveys[0]->{'config'})) {
+            $surveyname = $surveys[0]->{'config'}->{'title'};
+          }
         }
       }
     }
-  }
-  $categorynames = json_decode(json_encode($anniedb->selectCodes('category',$category)));
-  if (is_array($categorynames) && count($categorynames)>0) {
-    $categoryname = $categorynames[0];
-  } else {
-    $categoryname = (object)array($lang => $category); // default to code?
-  }
+    $categorynames = json_decode(json_encode($anniedb->selectCodes('category',$category)));
+    if (is_array($categorynames) && count($categorynames)>0) {
+      $categoryname = $categorynames[0];
+    } else {
+      $categoryname = (object)array('title' => $category); // default to code?
+    }
 
-  // AD-371 query for support need "request" id which is the first id of supportneed by contact+survey
-  $sql = "
-  select min(id) as supportneedrequestid
-  from $dbschm.supportneedhistory
-  where contact=:contact
-  and survey=:survey
-  group by contact, survey
-  ";
-  $sth = $dbh->prepare($sql);
-  $sth->bindParam(':contact', $contactid);
-  $sth->bindParam(':survey', $survey);
-  $sth->execute();
-  $res = $sth->fetch(PDO::FETCH_OBJ);
-  $supportneed = isset($res->supportneedrequestid) ? $res->supportneedrequestid : null;
+    // AD-371 query for support need "request" id which is the first id of supportneed by contact+survey
+    $sql = "
+    select min(id) as supportneedrequestid
+    from $dbschm.supportneed
+    where contact=:contact
+    and survey=:survey
+    group by contact, survey
+    ";
+    $sth = $dbh->prepare($sql);
+    $sth->bindParam(':contact', $contactid);
+    $sth->bindParam(':survey', $survey);
+    $sth->execute();
+    $res = $sth->fetch(PDO::FETCH_OBJ);
+    $supportneedid = isset($res->supportneedrequestid) ? $res->supportneedrequestid : null;
 
-  //error_log("DEBUG: SupportProcess: MAIL firstname=$firstname lastname=$lastname surveyname($survey)=".json_encode($surveyname)." categoryname($category)=".json_encode($categoryname)." annieusers=[".implode(",",$annieusers)."]");
-  if (isset($firstname) && isset($lastname) && isset($surveyname) && isset($categoryname)
-   && isset($annieusers) && !empty($annieusers) && isset($mailcontent) && isset($lang)
-  ) {
-    mailOnMessageToSupportneedImmediate($firstname,$lastname,$surveyname,$categoryname,$supportneed,$annieusers,$mailcontent,$lang);
-  }
-
+    //error_log("DEBUG: SupportProcess: MAIL firstname=$firstname lastname=$lastname surveyname($survey)=".json_encode($surveyname)." categoryname($category)=".json_encode($categoryname)." annieusers=[".implode(",",$annieusers)."]");
+    if (isset($firstname) && isset($lastname) && isset($surveyname) && isset($categoryname)
+     && isset($annieusers) && !empty($annieusers) && isset($mailcontent) && isset($lang)
+    ) {
+      mailOnMessageToSupportneedImmediate($firstname,$lastname,$surveyname,$categoryname,$supportneedid,$annieusers,$mailcontent,$lang);
+    }
+  }//-supporttype!=INFORMATION
 }//- mandatory variables
 ?>

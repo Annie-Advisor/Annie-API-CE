@@ -1,0 +1,2 @@
+ALTER TABLE contact
+  ADD COLUMN IF NOT EXISTS optout date NULL;

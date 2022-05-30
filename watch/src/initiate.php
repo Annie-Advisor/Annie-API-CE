@@ -38,7 +38,6 @@ $smsprovider = new Quriiri_API\Sender($smsapikey,$smsapiuri);
 // 1. "Initiated"
 //  -> [db]contactsurvey
 //  -> sendSMS(+db) .message
-//todo: when and where to:
 //  if .reminder:
 //    "no reply in time" (first or Nth time?)
 //    -> sendSMS(+db) .reminder
@@ -69,33 +68,37 @@ $smsprovider = new Quriiri_API\Sender($smsapikey,$smsapiuri);
 
 // variables
 $areyouokay = true;
-if (!$survey || !$destinations) {
+if (!$survey) {
   $areyouokay = false;
+  print(date("Y-m-d H:i:s")." FAILED: Initiate: survey not set");
+}
+if ($areyouokay && !$destinations) {
+  $areyouokay = false;
+  print(date("Y-m-d H:i:s")." FAILED: Initiate: destinations not set with: survey=".$survey.PHP_EOL);
 }
 
 //print("DEBUG: Initiate: config: survey: ".$survey.PHP_EOL);
+$messagetemplate = null;
 if ($areyouokay) {
   $surveyconfigs = json_decode(json_encode($anniedb->selectSurveyConfig($survey)));
-}
-$messagetemplate = null;
 
-
-// loop surveyconfig, phases
-if (count($surveyconfigs)>0) {
-  foreach ($surveyconfigs[0] as $jk => $jv) {//nb! should be only one!
-    if ("config" == $jk) { //must have
-      $flow = json_decode($jv);
-      // root level
-      //A, B, C...
-      if (array_key_exists("message", $flow)) {
-        $messagetemplate = $flow->{'message'};
-        break 1; //stop all
+  // loop surveyconfig, phases
+  if (count($surveyconfigs)>0) {
+    foreach ($surveyconfigs[0] as $jk => $jv) {//nb! should be only one!
+      if ("config" == $jk) { //must have
+        $flow = json_decode($jv);
+        // root level
+        //A, B, C...
+        if (array_key_exists("message", $flow)) {
+          $messagetemplate = $flow->{'message'};
+          break 1; //stop all
+        }
       }
     }
+  } else {
+    print(date("Y-m-d H:i:s")." FAILED: Initiate: config: could not find surveyconfig with: survey=".$survey.PHP_EOL);
+    $areyouokay = false;
   }
-} else {
-  print(date("Y-m-d H:i:s")." FAILED: Initiate: config: could not find surveyconfig with: survey=".$survey.PHP_EOL);
-  $areyouokay = false;
 }
 //print("DEBUG: Initiate: config: message: ".$messagetemplate.PHP_EOL);
 
@@ -124,13 +127,16 @@ if ($areyouokay && $messagetemplate) {
         //default: "updated"=>null,
         "updatedby"=>"Initiate" //not important
       ))));
-      //todo test $areyouokay
+      if (!$areyouokay) {
+        error_log("ERROR: Initiate: insert contactsurvey(1) failed");
+        $areyouokay = false;
+      }
+      //...continue anyway
 
       // make message personalized
       // replace string placeholders, like "{{ firstname }}"
       $contacts = json_decode(json_encode($anniedb->selectContact($contactid)));
       $contact = $contacts[0]->{'contact'};
-      $categorynamelocalized = $anniedb->originalSurveySupportneedCategoryNameLocalized($contactid,$survey);
 
       $replaceables = preg_split('/[^{]*(\{\{[^}]+\}\})[^{]*/', $message, -1, PREG_SPLIT_NO_EMPTY|PREG_SPLIT_DELIM_CAPTURE);
       $personalized = $message;
@@ -139,9 +145,6 @@ if ($areyouokay && $messagetemplate) {
           $replacekey = trim(strtolower(preg_replace('/\{\{\s*([^}]+)\s*\}\}/', '$1', $replaceable)));
           if (array_key_exists($replacekey, $contact)) {
             $personalized = str_replace($replaceable, $contact->{$replacekey}, $personalized);
-          }
-          if ($replacekey == "originalsurvey.supportneed.category.name") {
-            $personalized = str_replace($replaceable, $categorynamelocalized, $personalized);
           }
         }
       }
@@ -166,9 +169,10 @@ if ($areyouokay && $messagetemplate) {
         "context"=>"SURVEY"
       ))));
       if ($messageid === FALSE) {
+        error_log("ERROR: Initiate: insert message failed");
         $areyouokay = false;
       }
-      //todo test $areyouokay
+
       // sendSMS, one at a time due to personalized message
       if ($areyouokay) {
         // convert destination to array
@@ -195,7 +199,10 @@ if ($areyouokay && $messagetemplate) {
                 "updatedby"=>"Initiate",
                 "status"=>$data["status"]
               ))));
-              //todo test $areyouokay
+              if (!$areyouokay) {
+                error_log("ERROR: Initiate: update message failed");
+                $areyouokay = false;
+              }
               // on immediate fail:
               if ($data["status"] == "FAILED") {
                 // end the survey for this contact
@@ -205,11 +212,13 @@ if ($areyouokay && $messagetemplate) {
                   "status"=>"100",
                   "updatedby"=>"Initiate"
                 ))));
-                //todo test $areyouokay
+                if (!$areyouokay) {
+                  error_log("ERROR: Initiate: insert contactsurvey(2) failed");
+                  $areyouokay = false;
+                }
               }
             }
           }
-          //todo: test for areyouokay?
         }
       }
     }

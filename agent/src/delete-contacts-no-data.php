@@ -71,8 +71,6 @@ switch ($method) {
       union
       select contact from $dbschm.supportneed
       union
-      select contact from $dbschm.supportneedhistory
-      union
       select suco.contact
       from $dbschm.survey
       cross join jsonb_array_elements_text(survey.contacts) suco(contact)
@@ -83,6 +81,7 @@ switch ($method) {
       select au.superuser
       from $dbschm.annieuser au
       where au.id = :annieuser
+      and coalesce(au.validuntil,'9999-09-09') > now()
     )
     ";
     $sth = $dbh->prepare($sql);
